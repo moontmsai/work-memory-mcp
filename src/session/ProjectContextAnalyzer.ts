@@ -109,6 +109,14 @@ export class ProjectContextAnalyzer {
   }
 
   /**
+   * analyzeContext 메서드 (호환성을 위한 별칭)
+   * analyzeProjectContext와 동일한 기능을 제공
+   */
+  async analyzeContext(projectPath: string): Promise<ProjectContext> {
+    return this.analyzeProjectContext(projectPath);
+  }
+
+  /**
    * 워크스페이스 구조 분석
    */
   private async analyzeWorkspaceStructure(projectRoot: string): Promise<WorkspaceStructure> {

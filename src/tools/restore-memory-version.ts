@@ -220,15 +220,28 @@ export async function handleRestoreMemoryVersion(args: RestoreMemoryVersionArgs)
         restoredData.updated_at = now;
       }
 
+      // 태그 데이터 정규화 (문자열이면 파싱, 배열이면 그대로)
+      let normalizedTags: string[] = [];
+      if (typeof restoredData.tags === 'string') {
+        try {
+          const tagsString = restoredData.tags as string;
+          normalizedTags = tagsString.startsWith('[') ? JSON.parse(tagsString) : [];
+        } catch {
+          normalizedTags = [];
+        }
+      } else if (Array.isArray(restoredData.tags)) {
+        normalizedTags = restoredData.tags;
+      }
+
       // 데이터베이스 업데이트
       await connection.run(`
         UPDATE work_memories 
-        SET content = ?, project = ?, tags = ?, importance = ?, updated_at = ?
+        SET content = ?, project = ?, tags = ?, importance_score = ?, updated_at = ?
         WHERE id = ?
       `, [
         restoredData.content,
         restoredData.project,
-        JSON.stringify(restoredData.tags || []),
+        JSON.stringify(normalizedTags),
         restoredData.importance_score,
         now,
         args.memory_id
@@ -337,7 +350,7 @@ function formatRestorePreview(currentMemory: any, targetVersion: any, selectiveF
     content: currentMemory.content,
     project: currentMemory.project,
     tags: JSON.parse(currentMemory.tags || '[]'),
-    importance: currentMemory.importance
+    importance_score: currentMemory.importance_score
   };
 
   const target = targetVersion.data;
@@ -358,7 +371,7 @@ function formatRestorePreview(currentMemory: any, targetVersion: any, selectiveF
   } else {
     result += `📋 전체 복구 미리보기:\n\n`;
     
-    const fields = ['content', 'project', 'tags', 'importance'];
+    const fields = ['content', 'project', 'tags', 'importance_score'];
     for (const field of fields) {
       const currentValue = current[field as keyof typeof current];
       const targetValue = target[field];
@@ -409,7 +422,7 @@ function formatVersionsList(versions: any[], format: string, includeData: boolea
         if (version.data.tags && version.data.tags.length > 0) {
           result += `   🏷️ 태그: ${version.data.tags.join(', ')}\n`;
         }
-        result += `   ⭐ 중요도: ${version.data.importance}\n`;
+        result += `   ⭐ 중요도: ${version.data.importance_score}\n`;
       }
       result += '\n';
     } else {

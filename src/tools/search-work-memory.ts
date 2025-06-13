@@ -1,6 +1,8 @@
 import { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { getDatabaseConnection } from '../database/index.js';
 import { formatHumanReadableDate, getWorkedEmoji, getWorkedDisplayText } from '../utils/index.js';
+import { globalProgressTracker } from '../progress/ProgressTracker.js';
+import { v4 as uuidv4 } from 'uuid';
 
 /**
  * search_work_memory MCP 도구
@@ -25,6 +27,9 @@ export interface SearchWorkMemoryArgs {
   work_type?: 'memory' | 'todo';
   worked?: '완료' | '미완료';
   tags?: string[];
+  // 진행률 추적 옵션
+  enable_progress?: boolean; // 진행률 추적 활성화 (기본값: false)
+  progress_task_id?: string; // 진행률 추적용 작업 ID (자동 생성 가능)
 }
 
 export const searchWorkMemoryTool: Tool = {
@@ -119,6 +124,17 @@ export const searchWorkMemoryTool: Tool = {
         items: { type: 'string' },
         description: '특정 태그들로 필터링 (예: ["할일", "미완료"])',
         maxItems: 10
+      },
+      // 진행률 추적 옵션
+      enable_progress: {
+        type: 'boolean',
+        description: '진행률 추적 활성화 여부 (기본값: false)',
+        default: false
+      },
+      progress_task_id: {
+        type: 'string',
+        description: '진행률 추적용 작업 ID (자동 생성 가능)',
+        minLength: 1
       }
     },
     required: ['query']
@@ -131,14 +147,39 @@ export const searchWorkMemoryTool: Tool = {
 export async function handleSearchWorkMemory(args: SearchWorkMemoryArgs): Promise<string> {
   const startTime = Date.now();
   
+  // 진행률 추적 설정
+  let taskId: string | undefined;
+  if (args.enable_progress) {
+    taskId = args.progress_task_id || uuidv4();
+    globalProgressTracker.startTask({
+      taskId,
+      updateInterval: 500
+    });
+    
+    // SSE에 검색 작업 시작 알림 (ProgressTracker가 자동으로 전송)
+    globalProgressTracker.updateProgress(
+      taskId,
+      0,
+      '메모리 스캔 시작',
+      `검색어: "${args.query}"`,
+      0
+    );
+  }
+  
   try {
     const connection = getDatabaseConnection();
     if (!connection) {
+      if (taskId) {
+        globalProgressTracker.failTask(taskId, '데이터베이스 연결 실패');
+      }
       return '❌ 데이터베이스 연결을 사용할 수 없습니다.';
     }
 
     const query = args.query.trim();
     if (!query) {
+      if (taskId) {
+        globalProgressTracker.failTask(taskId, '검색 쿼리가 비어있음');
+      }
       return '❌ 검색 쿼리가 비어있습니다.';
     }
 
@@ -223,6 +264,17 @@ export async function handleSearchWorkMemory(args: SearchWorkMemoryArgs): Promis
     const searchTerms = query.split(/\s+/).filter(term => term.length > 0);
     const searchConditions: string[] = [];
     
+    // 진행률 업데이트 - 키워드 매칭 단계
+    if (taskId) {
+      globalProgressTracker.updateProgress(
+        taskId,
+        20,
+        '키워드 매칭',
+        `${searchTerms.length}개 검색어 처리 중`,
+        searchTerms.length
+      );
+    }
+    
     for (const term of searchTerms) {
       if (args.fuzzy_match) {
         // 퍼지 매칭 (부분 문자열 검색) - 할일 관리 필드 포함
@@ -240,6 +292,16 @@ export async function handleSearchWorkMemory(args: SearchWorkMemoryArgs): Promis
     }
 
     const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
+
+    // 진행률 업데이트 - 필터링 단계
+    if (taskId) {
+      globalProgressTracker.updateProgress(
+        taskId,
+        40,
+        '필터링 적용',
+        '조건에 맞는 메모리 선별 중'
+      );
+    }
 
     // 정렬 처리
     const importanceWeight = args.importance_weight ?? 0.3;
@@ -261,6 +323,16 @@ export async function handleSearchWorkMemory(args: SearchWorkMemoryArgs): Promis
           created_at DESC`;
     }
 
+    // 진행률 업데이트 - 정렬 단계
+    if (taskId) {
+      globalProgressTracker.updateProgress(
+        taskId,
+        60,
+        '결과 정렬',
+        `${args.sort_by || 'relevance'} 기준으로 정렬 중`
+      );
+    }
+
     // 내용 선택 (토큰 절약을 위해 기본은 서머리만)
     const contentFields = args.include_full_content
       ? 'content, extracted_content'  // 상세시: 전체 + 서머리
@@ -280,6 +352,18 @@ export async function handleSearchWorkMemory(args: SearchWorkMemoryArgs): Promis
     `;
 
     const results = await connection.all(searchQuery, [...params, limit]);
+    
+    // 진행률 업데이트 - 포맷팅 단계
+    if (taskId) {
+      globalProgressTracker.updateProgress(
+        taskId,
+        80,
+        '결과 포맷팅',
+        `${results.length}개 결과 형식화 중`,
+        results.length
+      );
+    }
+    
     const searchTime = Date.now() - startTime;
 
     // 결과 포맷팅
@@ -414,10 +498,21 @@ export async function handleSearchWorkMemory(args: SearchWorkMemoryArgs): Promis
       output += `📢 더 많은 결과가 있을 수 있습니다. limit을 늘려서 더 많은 결과를 확인하세요.\n`;
     }
 
+    // 진행률 완료 처리
+    if (taskId) {
+      globalProgressTracker.completeTask(taskId, `검색 완료: ${results.length}개 결과 반환`);
+    }
+
     return output;
 
   } catch (error) {
     const searchTime = Date.now() - startTime;
+    
+    // 진행률 실패 처리
+    if (taskId) {
+      globalProgressTracker.failTask(taskId, error instanceof Error ? error.message : '알 수 없는 오류');
+    }
+    
     return `❌ 검색 중 오류가 발생했습니다 (${searchTime}ms): ${error instanceof Error ? error.message : '알 수 없는 오류'}`;
   }
 }

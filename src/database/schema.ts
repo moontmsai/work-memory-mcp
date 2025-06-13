@@ -111,7 +111,7 @@ export const SCHEMA_SQL = {
     CREATE TABLE IF NOT EXISTS change_history (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       memory_id TEXT NOT NULL,
-      action TEXT CHECK(action IN ('created', 'updated', 'deleted', 'archived', 'accessed')) NOT NULL,
+      action TEXT CHECK(action IN ('created', 'updated', 'deleted', 'archived', 'accessed', 'restored')) NOT NULL,
       old_data TEXT, -- JSON 형태로 이전 상태 저장
       new_data TEXT, -- JSON 형태로 새로운 상태 저장
       timestamp TEXT DEFAULT (datetime('now')),

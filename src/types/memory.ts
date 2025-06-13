@@ -13,6 +13,8 @@ export interface WorkMemory {
   last_accessed_by?: string | undefined;
   access_count: number;
   importance_score: number; // 0-100 범위의 중요도 점수
+  // 세션 연결 필드
+  session_id?: string;
   // 할일 관리 확장 필드
   context?: string;
   requirements?: string;

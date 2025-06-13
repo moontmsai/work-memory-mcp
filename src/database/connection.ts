@@ -12,6 +12,7 @@ export interface DatabaseConnection {
   all: (sql: string, params?: any[]) => Promise<any[]>;
   close: () => Promise<void>;
   batch: (operations: Array<{sql: string, params?: any[]}>) => Promise<any[]>;
+  query: <T = any>(sql: string, params?: any[]) => Promise<T>; // 추가
 }
 
 // 연결 캐시 인터페이스
@@ -237,6 +238,34 @@ class DatabaseManager {
       }
     };
 
+    // 범용 query 메서드 구현 (호환성을 위해)
+    const query = async <T = any>(sql: string, params?: any[]): Promise<T> => {
+      const trimmedSql = sql.trim().toLowerCase();
+      
+      // SQL 타입에 따라 적절한 메서드 선택
+      if (trimmedSql.startsWith('select')) {
+        // SELECT 쿼리의 경우
+        if (trimmedSql.includes('limit 1') || trimmedSql.includes('limit(1)')) {
+          return await get(sql, params) as T;
+        } else {
+          return await all(sql, params) as T;
+        }
+      } else if (
+        trimmedSql.startsWith('insert') || 
+        trimmedSql.startsWith('update') || 
+        trimmedSql.startsWith('delete') ||
+        trimmedSql.startsWith('create') ||
+        trimmedSql.startsWith('drop') ||
+        trimmedSql.startsWith('alter')
+      ) {
+        // 변경 쿼리의 경우
+        return await run(sql, params) as T;
+      } else {
+        // 기본적으로 all 사용
+        return await all(sql, params) as T;
+      }
+    };
+
     const close = async (): Promise<void> => {
       // 캐시된 연결은 타이머가 관리하므로 즉시 닫지 않음
       return Promise.resolve();
@@ -247,6 +276,7 @@ class DatabaseManager {
       get,
       all,
       batch,
+      query, // 추가
       close
     };
   }

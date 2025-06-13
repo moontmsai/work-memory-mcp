@@ -29,11 +29,11 @@ export function isValidWorkedStatus(worked: string): worked is '완료' | '미�
  */
 export function determineOptimalWorkedStatus(
   workType: 'memory' | 'todo',
-  resultContent?: string,
-  explicitWorked?: '완료' | '미완료'
+  resultContent?: string | null,
+  explicitWorked?: '완료' | '미완료' | null
 ): '완료' | '미완료' {
   // 명시적 worked 값이 있으면 우선 적용
-  if (explicitWorked) {
+  if (explicitWorked && explicitWorked !== null) {
     return explicitWorked;
   }
   

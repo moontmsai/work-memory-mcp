@@ -13,6 +13,7 @@ import {
   SwitchRuleEngine
 } from '../types/session.js';
 import { DatabaseConnection } from '../database/connection.js';
+import { QueryResult } from '../types/database.js';
 import { SessionFactory } from './SessionFactory.js';
 import { SessionStateManager } from './SessionStateManager.js';
 import { SessionQueryManager } from './SessionQueryManager.js';
@@ -170,7 +171,7 @@ export class SessionSwitchManager {
    * 관련 세션 검색
    */
   private async findRelatedSessions(context: SwitchContext): Promise<WorkSession[]> {
-    const searches = [];
+    const searches: Array<Promise<QueryResult<WorkSession>>> = [];
 
     // 1. 프로젝트명으로 검색
     searches.push(

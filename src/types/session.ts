@@ -2,7 +2,10 @@
  * 세션 관리 시스템의 타입 정의
  */
 
-import { WorkMemory } from './memory.js';
+import { WorkMemory } from './memory';
+
+// Session 별칭 추가 (기존 코드와의 호환성을 위해)
+export type Session = WorkSession;
 
 // 세션 상태 열거형
 export enum SessionStatus {

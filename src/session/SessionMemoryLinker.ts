@@ -2,8 +2,8 @@
  * 세션과 메모리 간의 링크를 관리하는 클래스
  */
 
-import { DatabaseConnection } from '../types/database.js';
-import { SessionStatus, Session } from '../types/session.js';
+import { DatabaseConnection } from '../types/database';
+import { SessionStatus, Session } from '../types/session';
 
 export class SessionMemoryLinker {
   private connection: DatabaseConnection;

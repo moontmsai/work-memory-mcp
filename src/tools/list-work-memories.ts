@@ -1,6 +1,8 @@
 import { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { getDatabaseConnection } from '../database/index.js';
 import { formatHumanReadableDate, getWorkedEmoji, getWorkedDisplayText } from '../utils/index.js';
+import { globalProgressTracker } from '../progress/ProgressTracker.js';
+import { v4 as uuidv4 } from 'uuid';
 
 export interface ListWorkMemoriesArgs {
   project?: string;
@@ -19,6 +21,9 @@ export interface ListWorkMemoriesArgs {
   search_keyword?: string;
   work_type?: 'memory' | 'todo';
   worked?: '완료' | '미완료';
+  // 진행률 추적 옵션
+  enable_progress?: boolean; // 진행률 추적 활성화 (기본값: false)
+  progress_task_id?: string; // 진행률 추적용 작업 ID (자동 생성 가능)
 }
 
 export const listWorkMemoriesTool: Tool = {
@@ -116,15 +121,48 @@ export const listWorkMemoriesTool: Tool = {
         type: 'string',
         enum: ['완료', '미완료'],
         description: '작업 완료 상태로 필터링 (선택사항)'
+      },
+      // 진행률 추적 옵션
+      enable_progress: {
+        type: 'boolean',
+        description: '진행률 추적 활성화 여부 (기본값: false)',
+        default: false
+      },
+      progress_task_id: {
+        type: 'string',
+        description: '진행률 추적용 작업 ID (자동 생성 가능)',
+        minLength: 1
       }
     }
   }
 };
 
 export async function handleListWorkMemories(args: ListWorkMemoriesArgs = {}): Promise<string> {
+  const startTime = Date.now();
+  
+  // 진행률 추적 설정
+  let taskId: string | undefined;
+  if (args.enable_progress) {
+    taskId = args.progress_task_id || uuidv4();
+    globalProgressTracker.startTask({
+      taskId,
+      updateInterval: 500
+    });
+    
+    globalProgressTracker.updateProgress(
+      taskId,
+      0,
+      '메모리 목록 조회 시작',
+      '필터 조건 준비 중'
+    );
+  }
+  
   try {
     const connection = getDatabaseConnection();
     if (!connection) {
+      if (taskId) {
+        globalProgressTracker.failTask(taskId, '데이터베이스 연결 실패');
+      }
       return '❌ 데이터베이스 연결을 사용할 수 없습니다.';
     }
 
@@ -135,6 +173,16 @@ export async function handleListWorkMemories(args: ListWorkMemoriesArgs = {}): P
     const sortOrder = args.sort_order || 'desc';
     const includeContent = args.include_content !== false;
     const includeStats = args.include_stats !== false;
+
+    // 진행률 업데이트 - 필터 조건 구성
+    if (taskId) {
+      globalProgressTracker.updateProgress(
+        taskId,
+        20,
+        '필터 조건 구성',
+        '검색 조건 설정 중'
+      );
+    }
 
     // WHERE 조건 구성
     const whereConditions: string[] = ['is_archived = 0']; // archived 대신 is_archived 사용
@@ -220,6 +268,16 @@ export async function handleListWorkMemories(args: ListWorkMemoriesArgs = {}): P
 
     const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
 
+    // 진행률 업데이트 - 데이터베이스 쿼리 실행
+    if (taskId) {
+      globalProgressTracker.updateProgress(
+        taskId,
+        40,
+        '데이터베이스 쿼리 실행',
+        '메모리 개수 조회 중'
+      );
+    }
+
     // 정렬 처리
     const validSortColumns = ['created_at', 'updated_at', 'access_count', 'importance_score', 'project'];
     const finalSortBy = validSortColumns.includes(sortBy) ? sortBy : 'updated_at';
@@ -229,6 +287,16 @@ export async function handleListWorkMemories(args: ListWorkMemoriesArgs = {}): P
     const totalCountQuery = `SELECT COUNT(*) as count FROM work_memories ${whereClause}`;
     const totalResult = await connection.get(totalCountQuery, params);
     const totalCount = totalResult?.count || 0;
+
+    // 진행률 업데이트 - 메모리 목록 조회
+    if (taskId) {
+      globalProgressTracker.updateProgress(
+        taskId,
+        60,
+        '메모리 목록 조회',
+        `${totalCount}개 중 ${limit}개 조회 중`
+      );
+    }
 
     // 내용 선택 (토큰 절약을 위해 기본은 서머리만)
     const contentSelect = includeContent 
@@ -248,6 +316,16 @@ export async function handleListWorkMemories(args: ListWorkMemoriesArgs = {}): P
     `;
 
     const memories = await connection.all(selectQuery, [...params, limit, offset]);
+
+    // 진행률 업데이트 - 결과 포맷팅
+    if (taskId) {
+      globalProgressTracker.updateProgress(
+        taskId,
+        80,
+        '결과 포맷팅',
+        `${memories.length}개 메모리 포맷팅 중`
+      );
+    }
 
     // 결과 포맷팅
     let result = `📋 워크 메모리 목록 (총 ${totalCount}개)\n\n`;
@@ -338,9 +416,19 @@ export async function handleListWorkMemories(args: ListWorkMemoriesArgs = {}): P
       result += `   • 총 접근 횟수: ${stats.total_access_count}회\n`;
     }
 
+    // 진행률 완료 처리
+    if (taskId) {
+      globalProgressTracker.completeTask(taskId, `목록 조회 완료: ${memories.length}개 반환`);
+    }
+
     return result;
 
   } catch (error) {
+    // 진행률 실패 처리
+    if (taskId) {
+      globalProgressTracker.failTask(taskId, error instanceof Error ? error.message : '알 수 없는 오류');
+    }
+    
     return `❌ 메모리 목록 조회 중 오류가 발생했습니다: ${error instanceof Error ? error.message : '알 수 없는 오류'}`;
   }
 } 
