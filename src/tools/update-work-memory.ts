@@ -18,6 +18,7 @@ export interface UpdateWorkMemoryArgs {
   requirements?: string;
   result_content?: string;
   work_type?: 'memory' | 'todo';
+  worked?: '완료' | '미완료';
 }
 
 export const updateWorkMemoryTool: Tool = {
@@ -87,6 +88,11 @@ export const updateWorkMemoryTool: Tool = {
         type: 'string',
         enum: ['memory', 'todo'],
         description: '작업 유형 (선택사항)'
+      },
+      worked: {
+        type: 'string',
+        enum: ['완료', '미완료'],
+        description: '작업 완료 상태 (선택사항)'
       }
     },
     required: ['memory_id']

@@ -23,6 +23,7 @@ export interface SearchWorkMemoryArgs {
   importance_weight?: number; // 검색 결과에서 중요도 가중치 (0-1, 기본값 0.3)
   // 할일 관리 확장 필드
   work_type?: 'memory' | 'todo';
+  worked?: '완료' | '미완료';
   tags?: string[];
 }
 
@@ -107,6 +108,11 @@ export const searchWorkMemoryTool: Tool = {
         type: 'string',
         enum: ['memory', 'todo'],
         description: '작업 유형 필터 (선택사항)'
+      },
+      worked: {
+        type: 'string',
+        enum: ['완료', '미완료'],
+        description: '작업 완료 상태 필터 (선택사항)'
       },
       tags: {
         type: 'array',

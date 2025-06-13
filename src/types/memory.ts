@@ -13,6 +13,12 @@ export interface WorkMemory {
   last_accessed_by?: string | undefined;
   access_count: number;
   importance_score: number; // 0-100 범위의 중요도 점수
+  // 할일 관리 확장 필드
+  context?: string;
+  requirements?: string;
+  result_content?: string;
+  work_type?: 'memory' | 'todo';
+  worked?: '완료' | '미완료';
 }
 
 export interface MemoryStats {
@@ -72,6 +78,12 @@ export interface CreateMemoryOptions {
   tags?: string[];
   created_by: 'claude_app' | 'cursor_ai' | string;
   importance_score?: number; // 0-100 범위의 중요도 점수, 기본값 50
+  // 할일 관리 확장 필드
+  context?: string;
+  requirements?: string;
+  result_content?: string;
+  work_type?: 'memory' | 'todo';
+  worked?: '완료' | '미완료';
 }
 
 export interface UpdateMemoryOptions {
@@ -80,6 +92,12 @@ export interface UpdateMemoryOptions {
   tags?: string[] | undefined;
   importance_score?: number | undefined; // 0-100 범위의 중요도 점수
   accessed_by?: string | undefined;
+  // 할일 관리 확장 필드
+  context?: string;
+  requirements?: string;
+  result_content?: string;
+  work_type?: 'memory' | 'todo';
+  worked?: '완료' | '미완료';
 }
 
 // 중요도 점수 관련 타입과 상수

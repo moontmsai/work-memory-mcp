@@ -17,6 +17,8 @@ export interface ListWorkMemoriesArgs {
   include_content?: boolean;
   include_stats?: boolean;
   search_keyword?: string;
+  work_type?: 'memory' | 'todo';
+  worked?: '완료' | '미완료';
 }
 
 export const listWorkMemoriesTool: Tool = {
@@ -104,6 +106,16 @@ export const listWorkMemoriesTool: Tool = {
         type: 'string',
         description: '내용에서 검색할 키워드 (간단한 텍스트 매칭)',
         minLength: 1
+      },
+      work_type: {
+        type: 'string',
+        enum: ['memory', 'todo'],
+        description: '작업 유형으로 필터링 (선택사항)'
+      },
+      worked: {
+        type: 'string',
+        enum: ['완료', '미완료'],
+        description: '작업 완료 상태로 필터링 (선택사항)'
       }
     }
   }
