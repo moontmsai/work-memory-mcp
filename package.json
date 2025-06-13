@@ -29,6 +29,7 @@
     "test:performance": "vitest run tests/performance",
     "test:coverage": "vitest --coverage",
     "test:watch": "vitest --watch",
+    "test:sse": "ts-node sse-test.ts",
     "lint": "eslint src/**/*.ts",
     "lint:fix": "eslint src/**/*.ts --fix",
     "prepublishOnly": "npm run build && npm test",
