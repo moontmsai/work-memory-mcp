@@ -1,6 +1,6 @@
 import { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { getDatabaseConnection } from '../database/index.js';
-import { generateMemoryId, getCurrentISOString, extractKeywords } from '../utils/index.js';
+import { generateMemoryId, getCurrentISOString, extractKeywords, determineOptimalWorkedStatus, getWorkedEmoji, getWorkedDisplayText } from '../utils/index.js';
 import { generateSummary } from '../utils/summary-generator.js';
 import { DatabaseConnection } from '../database/connection.js';
 import { validateWorkMemory } from '../utils/validation.js';
@@ -117,6 +117,9 @@ export async function handleAddWorkMemory(args: AddWorkMemoryArgs): Promise<stri
     const resultContent = args.result_content?.trim() || null;
     const workType = args.work_type || 'memory';
 
+    // worked 상태 결정 (자동 감지 또는 명시적 값)
+    const worked = determineOptimalWorkedStatus(workType, resultContent, args.worked);
+
     // 할일 저장 시 context 필수 검증
     if (workType === 'todo') {
       if (!context) {
@@ -132,8 +135,8 @@ export async function handleAddWorkMemory(args: AddWorkMemoryArgs): Promise<stri
       INSERT INTO work_memories (
         id, content, extracted_content, project, tags, importance_score, created_by,
         created_at, updated_at, access_count,
-        context, requirements, result_content, work_type
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        context, requirements, result_content, work_type, worked
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [
       memoryId,
       content,
@@ -148,7 +151,8 @@ export async function handleAddWorkMemory(args: AddWorkMemoryArgs): Promise<stri
       context,
       requirements,
       resultContent,
-      workType
+      workType,
+      worked
     ]);
 
     // 2. 태그별로 즉시 INSERT
@@ -294,7 +298,8 @@ export async function handleAddWorkMemory(args: AddWorkMemoryArgs): Promise<stri
                  `${typeIcon} 내용: ${content.substring(0, 100)}${content.length > 100 ? '...' : ''}\n` +
                  `📝 서머리: ${extractedContent}\n` +
                  `🆔 ID: ${memoryId}${tagsInfo}${projectInfo}\n` +
-                 `⭐ 중요도: ${getImportanceLevel(importanceScore)} (${importanceScore}점)`;
+                 `⭐ 중요도: ${getImportanceLevel(importanceScore)} (${importanceScore}점)\n` +
+                 `${getWorkedEmoji(worked)} 상태: ${getWorkedDisplayText(worked)}`;
     
     // 세션 연동 결과 추가
     if (sessionLinkResult.success && sessionLinkResult.session_id) {

@@ -1,6 +1,6 @@
 import { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { getDatabaseConnection } from '../database/index.js';
-import { formatHumanReadableDate } from '../utils/index.js';
+import { formatHumanReadableDate, getWorkedEmoji, getWorkedDisplayText } from '../utils/index.js';
 
 /**
  * search_work_memory MCP 도구
@@ -166,6 +166,12 @@ export async function handleSearchWorkMemory(args: SearchWorkMemoryArgs): Promis
       params.push(args.work_type);
     }
 
+    // worked 상태 필터
+    if (args.worked) {
+      whereConditions.push('worked = ?');
+      params.push(args.worked);
+    }
+
     // 태그 필터 (모든 태그가 포함되어야 함)
     if (args.tags && args.tags.length > 0) {
       for (const tag of args.tags) {
@@ -265,7 +271,7 @@ export async function handleSearchWorkMemory(args: SearchWorkMemoryArgs): Promis
       SELECT 
         id, ${contentFields}, project, tags, importance_score, created_by,
         created_at, updated_at, access_count, last_accessed_at,
-        context, requirements, result_content, work_type,
+        context, requirements, result_content, work_type, worked,
         ((100 * ${1 - importanceWeight}) + (importance_score * ${importanceWeight})) as combined_score
       FROM work_memories 
       ${whereClause}
@@ -371,6 +377,11 @@ export async function handleSearchWorkMemory(args: SearchWorkMemoryArgs): Promis
       
       if (tags.length > 0) {
         output += `   🏷️ 태그: ${tags.map((tag: string) => `#${tag}`).join(' ')}\n`;
+      }
+      
+      // worked 상태 표시
+      if (memory.worked) {
+        output += `   ${getWorkedEmoji(memory.worked)} 상태: ${getWorkedDisplayText(memory.worked)}\n`;
       }
       
       output += `   👤 작성자: ${memory.created_by}\n`;

@@ -1,6 +1,6 @@
 import { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { getDatabaseConnection } from '../database/index.js';
-import { getCurrentISOString } from '../utils/index.js';
+import { getCurrentISOString, determineOptimalWorkedStatus, getWorkedEmoji, getWorkedDisplayText } from '../utils/index.js';
 import { VersionManager } from '../history/version-manager.js';
 import { WorkMemory } from '../types/memory.js';
 
@@ -187,6 +187,23 @@ export async function handleUpdateWorkMemory(args: UpdateWorkMemoryArgs): Promis
       changes.push('작업유형 변경');
     }
 
+    // worked 상태 업데이트 (자동 감지 또는 명시적 값)
+    let finalWorked = existingMemory.worked;
+    if (args.worked !== undefined) {
+      // 명시적 worked 값이 있으면 사용
+      finalWorked = args.worked;
+    } else if (args.result_content !== undefined) {
+      // result_content 변경 시 자동 감지
+      const workType = updates.work_type || existingMemory.work_type || 'memory';
+      finalWorked = determineOptimalWorkedStatus(workType, args.result_content);
+    }
+    
+    if (finalWorked !== existingMemory.worked) {
+      updates.worked = finalWorked;
+      hasChanges = true;
+      changes.push('완료상태 변경');
+    }
+
     // 🔧 할일 완료 처리 및 태그 업데이트 로직 통합
     const isToDoCompletion = existingMemory.work_type === 'todo' && 
                             args.result_content !== undefined && 
@@ -369,9 +386,18 @@ export async function handleUpdateWorkMemory(args: UpdateWorkMemoryArgs): Promis
 
     // 8. 응답 생성
     const changesList = changes.map(change => `• ${change}`).join('\n');
-    return `✅ 메모리가 성공적으로 업데이트되었습니다.\n` +
+    let result = `✅ 메모리가 성공적으로 업데이트되었습니다.\n` +
            `🆔 ID: ${args.memory_id}\n` +
-           `📝 변경사항:\n${changesList}${versionInfo}${sessionUpdateInfo}`;
+           `📝 변경사항:\n${changesList}`;
+    
+    // worked 상태 표시 (변경된 경우)
+    if (updates.worked !== undefined) {
+      result += `\n${getWorkedEmoji(updates.worked)} 상태: ${getWorkedDisplayText(updates.worked)}`;
+    }
+    
+    result += `${versionInfo}${sessionUpdateInfo}`;
+    
+    return result;
 
   } catch (error) {
     if (error instanceof Error) {

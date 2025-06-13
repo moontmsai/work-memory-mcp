@@ -1,6 +1,6 @@
 import { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { getDatabaseConnection } from '../database/index.js';
-import { formatHumanReadableDate } from '../utils/index.js';
+import { formatHumanReadableDate, getWorkedEmoji, getWorkedDisplayText } from '../utils/index.js';
 
 export interface ListWorkMemoriesArgs {
   project?: string;
@@ -170,6 +170,18 @@ export async function handleListWorkMemories(args: ListWorkMemoriesArgs = {}): P
       params.push(`%${args.search_keyword}%`);
     }
 
+    // work_type 필터
+    if (args.work_type) {
+      whereConditions.push('work_type = ?');
+      params.push(args.work_type);
+    }
+
+    // worked 필터
+    if (args.worked) {
+      whereConditions.push('worked = ?');
+      params.push(args.worked);
+    }
+
     // 시간 범위 필터
     if (args.time_range && args.time_range !== 'all') {
       const now = new Date();
@@ -227,7 +239,8 @@ export async function handleListWorkMemories(args: ListWorkMemoriesArgs = {}): P
     const selectQuery = `
       SELECT 
         id, ${contentSelect}, project, tags, importance_score, created_by,
-        created_at, updated_at, access_count, last_accessed_at, is_archived
+        created_at, updated_at, access_count, last_accessed_at, is_archived,
+        context, requirements, result_content, work_type, worked
       FROM work_memories 
       ${whereClause}
       ORDER BY ${finalSortBy} ${finalSortOrder}
@@ -258,7 +271,10 @@ export async function handleListWorkMemories(args: ListWorkMemoriesArgs = {}): P
       
       const importance = getImportanceDisplay(memory.importance_score);
       
-      result += `${offset + index + 1}. ${importance.icon} ${memory.id}\n`;
+      // 작업 유형 아이콘
+      const typeIcon = memory.work_type === 'todo' ? '📋' : '💭';
+      
+      result += `${offset + index + 1}. ${typeIcon} ${importance.icon} ${memory.id}\n`;
       
       // 심플한 표시 로직 - 토큰 절약 목적
       const displayContent = includeContent 
@@ -273,6 +289,11 @@ export async function handleListWorkMemories(args: ListWorkMemoriesArgs = {}): P
       
       if (tags.length > 0) {
         result += `   🏷️ 태그: ${tags.map((tag: string) => `#${tag}`).join(' ')}\n`;
+      }
+      
+      // worked 상태 표시
+      if (memory.worked) {
+        result += `   ${getWorkedEmoji(memory.worked)} 상태: ${getWorkedDisplayText(memory.worked)}\n`;
       }
       
       result += `   👤 작성자: ${memory.created_by}\n`;

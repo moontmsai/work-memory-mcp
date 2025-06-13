@@ -67,3 +67,13 @@ export {
   SearchManager
 } from './search-manager.js';
 
+// worked 상태 관리
+export {
+  getDefaultWorked,
+  detectCompletionStatus,
+  isValidWorkedStatus,
+  determineOptimalWorkedStatus,
+  getWorkedEmoji,
+  getWorkedDisplayText
+} from './worked-utils.js';
+

@@ -23,6 +23,7 @@ export const SCHEMA_SQL = {
       requirements TEXT, -- 구체적 요구사항
       result_content TEXT, -- 작업 결과물
       work_type TEXT CHECK(work_type IN ('memory', 'todo')) DEFAULT 'memory', -- 작업 유형
+      worked TEXT CHECK(worked IN ('완료', '미완료')), -- 작업 완료 상태
       -- 검색 최적화를 위한 추가 필드
       content_length INTEGER GENERATED ALWAYS AS (length(content)) STORED,
       project_normalized TEXT GENERATED ALWAYS AS (lower(trim(project))) STORED
@@ -167,6 +168,8 @@ export const SCHEMA_SQL = {
     'CREATE INDEX IF NOT EXISTS idx_work_memories_is_archived ON work_memories(is_archived);',
     'CREATE INDEX IF NOT EXISTS idx_work_memories_created_by ON work_memories(created_by);',
     'CREATE INDEX IF NOT EXISTS idx_work_memories_content_length ON work_memories(content_length);',
+    'CREATE INDEX IF NOT EXISTS idx_work_memories_work_type ON work_memories(work_type);',
+    'CREATE INDEX IF NOT EXISTS idx_work_memories_worked ON work_memories(worked);',
     
     // search_keywords 테이블 인덱스
     'CREATE INDEX IF NOT EXISTS idx_search_keywords_memory_id ON search_keywords(memory_id);',
@@ -213,6 +216,8 @@ export const SCHEMA_SQL = {
     'CREATE INDEX IF NOT EXISTS idx_work_memories_score_project ON work_memories(importance_score DESC, project);',
     'CREATE INDEX IF NOT EXISTS idx_work_memories_archived_score_created ON work_memories(is_archived, importance_score DESC, created_at DESC);',
     'CREATE INDEX IF NOT EXISTS idx_work_memories_worktype_score ON work_memories(work_type, importance_score DESC);',
+    'CREATE INDEX IF NOT EXISTS idx_work_memories_worked_score ON work_memories(worked, importance_score DESC);',
+    'CREATE INDEX IF NOT EXISTS idx_work_memories_worktype_worked ON work_memories(work_type, worked);',
     'CREATE INDEX IF NOT EXISTS idx_search_keywords_keyword_weight ON search_keywords(keyword, weight);',
     'CREATE INDEX IF NOT EXISTS idx_memory_versions_memory_timestamp ON memory_versions(memory_id, timestamp);',
     
@@ -291,11 +296,20 @@ async function migrateToDoFields(connection: DatabaseConnection): Promise<void> 
       await connection.run('ALTER TABLE work_memories ADD COLUMN work_type TEXT CHECK(work_type IN (\'memory\', \'todo\')) DEFAULT \'memory\';');
     }
 
+    if (!existingColumns.includes('worked')) {
+      await connection.run('ALTER TABLE work_memories ADD COLUMN worked TEXT CHECK(worked IN (\'완료\', \'미완료\'));');
+    }
+
     // importance 필드를 importance_score로 마이그레이션
     await migrateImportanceToScore(connection, existingColumns);
 
     // work_type 인덱스 추가
     await connection.run('CREATE INDEX IF NOT EXISTS idx_work_memories_work_type ON work_memories(work_type);');
+    
+    // worked 인덱스 추가
+    await connection.run('CREATE INDEX IF NOT EXISTS idx_work_memories_worked ON work_memories(worked);');
+    await connection.run('CREATE INDEX IF NOT EXISTS idx_work_memories_worked_score ON work_memories(worked, importance_score DESC);');
+    await connection.run('CREATE INDEX IF NOT EXISTS idx_work_memories_worktype_worked ON work_memories(work_type, worked);');
     
   } catch (error) {
     // 마이그레이션 실패는 경고만 출력하고 계속 진행
