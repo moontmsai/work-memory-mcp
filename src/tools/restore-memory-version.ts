@@ -4,6 +4,7 @@ import { VersionManager } from '../history/version-manager.js';
 import { VersionInfo } from '../history/types.js';
 import { getCurrentISOString } from '../utils/index.js';
 import { WorkMemory } from '../types/memory.js';
+import { normalizeTags, serializeTags } from '../utils/helpers.js';
 
 /**
  * 메모리 버전 복구 인수 타입
@@ -220,18 +221,8 @@ export async function handleRestoreMemoryVersion(args: RestoreMemoryVersionArgs)
         restoredData.updated_at = now;
       }
 
-      // 태그 데이터 정규화 (문자열이면 파싱, 배열이면 그대로)
-      let normalizedTags: string[] = [];
-      if (typeof restoredData.tags === 'string') {
-        try {
-          const tagsString = restoredData.tags as string;
-          normalizedTags = tagsString.startsWith('[') ? JSON.parse(tagsString) : [];
-        } catch {
-          normalizedTags = [];
-        }
-      } else if (Array.isArray(restoredData.tags)) {
-        normalizedTags = restoredData.tags;
-      }
+      // 태그 데이터 정규화 - 시스템 전체 일관성 보장
+      const normalizedTags = normalizeTags(restoredData.tags);
 
       // 데이터베이스 업데이트
       await connection.run(`
@@ -241,7 +232,7 @@ export async function handleRestoreMemoryVersion(args: RestoreMemoryVersionArgs)
       `, [
         restoredData.content,
         restoredData.project,
-        JSON.stringify(normalizedTags),
+        serializeTags(normalizedTags),
         restoredData.importance_score,
         now,
         args.memory_id

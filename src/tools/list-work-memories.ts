@@ -3,6 +3,7 @@ import { getDatabaseConnection } from '../database/index.js';
 import { formatHumanReadableDate, getWorkedEmoji, getWorkedDisplayText } from '../utils/index.js';
 import { globalProgressTracker } from '../progress/ProgressTracker.js';
 import { v4 as uuidv4 } from 'uuid';
+import { deserializeTags } from '../utils/helpers.js';
 
 export interface ListWorkMemoriesArgs {
   project?: string;
@@ -336,7 +337,8 @@ export async function handleListWorkMemories(args: ListWorkMemoriesArgs = {}): P
     }
 
     memories.forEach((memory: any, index: number) => {
-      const tags = memory.tags ? JSON.parse(memory.tags) : [];
+      // 태그 데이터 안전하게 정규화
+      const tags = deserializeTags(memory.tags);
       
       // 중요도 점수에 따른 아이콘과 레벨
       const getImportanceDisplay = (score: number): { icon: string; level: string } => {

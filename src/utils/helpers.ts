@@ -141,3 +141,85 @@ export function getRelevanceLevel(score: number): 'high' | 'medium' | 'low' {
   if (score >= 5) return 'medium';
   return 'low';
 }
+
+/**
+ * 태그 데이터 정규화 함수들
+ * 시스템 전체에서 태그 데이터 타입 일관성을 보장
+ */
+
+/**
+ * 태그를 안전한 문자열 배열로 정규화
+ * @param tags - 다양한 형태의 태그 데이터
+ * @returns 정규화된 문자열 배열
+ */
+export function normalizeTags(tags: any): string[] {
+  try {
+    // null, undefined 처리
+    if (!tags) return [];
+    
+    // 이미 배열인 경우
+    if (Array.isArray(tags)) {
+      return tags.filter(tag => typeof tag === 'string' && tag.trim().length > 0);
+    }
+    
+    // 문자열인 경우
+    if (typeof tags === 'string') {
+      // 빈 문자열 처리
+      if (tags.trim().length === 0) return [];
+      
+      // JSON 배열 문자열인 경우 파싱 시도
+      if (tags.startsWith('[') && tags.endsWith(']')) {
+        try {
+          const parsed = JSON.parse(tags);
+          if (Array.isArray(parsed)) {
+            return parsed.filter(tag => typeof tag === 'string' && tag.trim().length > 0);
+          }
+        } catch {
+          // JSON 파싱 실패 시 단일 태그로 처리
+          return [tags];
+        }
+      }
+      
+      // 일반 문자열은 단일 태그로 처리
+      return [tags];
+    }
+    
+    // 기타 타입은 빈 배열 반환
+    return [];
+  } catch (error) {
+    console.warn('Tag normalization failed:', error);
+    return [];
+  }
+}
+
+/**
+ * 태그를 데이터베이스 저장용 JSON 문자열로 변환
+ * @param tags - 태그 배열
+ * @returns JSON 문자열
+ */
+export function serializeTags(tags: string[]): string {
+  const normalizedTags = normalizeTags(tags);
+  return JSON.stringify(normalizedTags);
+}
+
+/**
+ * 데이터베이스에서 읽은 태그 데이터를 배열로 변환
+ * @param tagsData - 데이터베이스에서 읽은 태그 데이터
+ * @returns 정규화된 문자열 배열
+ */
+export function deserializeTags(tagsData: any): string[] {
+  return normalizeTags(tagsData);
+}
+
+/**
+ * 태그 데이터 검증
+ * @param tags - 검증할 태그 데이터
+ * @returns 유효성 검사 결과
+ */
+export function validateTags(tags: any): { isValid: boolean; normalizedTags: string[] } {
+  const normalizedTags = normalizeTags(tags);
+  const isValid = normalizedTags.length <= 20 && // 최대 20개 태그
+                  normalizedTags.every(tag => tag.length <= 50); // 각 태그는 50자 이하
+  
+  return { isValid, normalizedTags };
+}
