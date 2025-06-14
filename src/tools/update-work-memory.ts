@@ -369,6 +369,17 @@ export async function handleUpdateWorkMemory(args: UpdateWorkMemoryArgs): Promis
           
           if (linkResult.success) {
             sessionUpdateInfo = `\n🔗 세션 연동: ${currentSessionId.substring(0, 20)}...`;
+            
+            // 🚀 독점 관리자에게 세션 활동 알림 (연장)
+            try {
+              const { getExclusiveManager } = await import('../session/SessionExclusiveManager.js');
+              const exclusiveManager = getExclusiveManager();
+              if (exclusiveManager) {
+                await exclusiveManager.extendSession(currentSessionId, 'memory_update');
+              }
+            } catch (exclusiveError) {
+              console.warn('Failed to update exclusive session on link:', exclusiveError);
+            }
           }
         } else if (oldData.session_id && currentSessionId && oldData.session_id !== currentSessionId) {
           // 활성 세션이 변경된 경우 세션 업데이트
@@ -377,6 +388,28 @@ export async function handleUpdateWorkMemory(args: UpdateWorkMemoryArgs): Promis
             [currentSessionId, new Date().toISOString(), args.memory_id]
           );
           sessionUpdateInfo = `\n🔄 세션 변경: ${currentSessionId.substring(0, 20)}...`;
+          
+          // 🚀 독점 관리자에게 새 세션 활성화 알림 (교체)
+          try {
+            const { getExclusiveManager } = await import('../session/SessionExclusiveManager.js');
+            const exclusiveManager = getExclusiveManager();
+            if (exclusiveManager) {
+              await exclusiveManager.activateSession(currentSessionId, 'session_switch_on_update');
+            }
+          } catch (exclusiveError) {
+            console.warn('Failed to activate exclusive session on switch:', exclusiveError);
+          }
+        } else if (oldData.session_id === currentSessionId && currentSessionId) {
+          // 같은 세션에서 업데이트 - 시간 연장
+          try {
+            const { getExclusiveManager } = await import('../session/SessionExclusiveManager.js');
+            const exclusiveManager = getExclusiveManager();
+            if (exclusiveManager) {
+              await exclusiveManager.extendSession(currentSessionId, 'memory_update');
+            }
+          } catch (exclusiveError) {
+            console.warn('Failed to extend exclusive session on update:', exclusiveError);
+          }
         }
       }
     } catch (sessionError) {

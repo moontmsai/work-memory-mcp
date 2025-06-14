@@ -56,11 +56,24 @@ export async function handleSessionManager(args: SessionManagerArgs): Promise<st
         await sessionContext.setActiveSession(args.session_id);
         const context = sessionContext.getCurrentContext();
         
+        // 🚀 독점 관리자에게 세션 활성화 알림
+        let exclusiveInfo = '';
+        try {
+          const { getExclusiveManager } = await import('../session/SessionExclusiveManager.js');
+          const exclusiveManager = getExclusiveManager();
+          if (exclusiveManager) {
+            const exclusiveSession = await exclusiveManager.activateSession(args.session_id, 'manual_set_active');
+            exclusiveInfo = `\n🔒 독점 세션: ${Math.floor(exclusiveSession.timeRemaining / 60)}분 동안 유지`;
+          }
+        } catch (exclusiveError) {
+          console.warn('Failed to activate exclusive session:', exclusiveError);
+        }
+        
         return `✅ 활성 세션이 설정되었습니다.\n` +
                `🆔 세션 ID: ${args.session_id}\n` +
                `📁 프로젝트: ${context.project_name || 'Unknown'}\n` +
                `🔗 자동 연결: ${context.auto_link_enabled ? '활성화' : '비활성화'}\n` +
-               `📅 설정 시간: ${context.last_updated}`;
+               `📅 설정 시간: ${context.last_updated}${exclusiveInfo}`;
       }
 
       case 'clear': {
@@ -140,12 +153,28 @@ export async function handleSessionStatus(args: SessionStatusArgs): Promise<stri
       case 'get_context': {
         const status = sessionContext.getStatus();
 
+        // 🚀 독점 세션 상태 확인
+        let exclusiveInfo = '';
+        try {
+          const { getExclusiveManager } = await import('../session/SessionExclusiveManager.js');
+          const exclusiveManager = getExclusiveManager();
+          if (exclusiveManager) {
+            const exclusiveStatus = await exclusiveManager.getExclusiveStatus();
+            if (exclusiveStatus.hasExclusiveSession) {
+              const remainingMinutes = Math.floor(exclusiveStatus.timeRemaining / 60);
+              exclusiveInfo = `\n🔒 독점 세션: ${remainingMinutes}분 남음`;
+            }
+          }
+        } catch (exclusiveError) {
+          console.warn('Failed to get exclusive session status:', exclusiveError);
+        }
+
         if (status.has_active_session) {
           return `📋 현재 세션 상태\n` +
                  `🆔 세션 ID: ${status.session_id}\n` +
                  `📁 프로젝트: ${status.project_name || 'Unknown'}\n` +
                  `🔗 자동 연결: ${status.auto_link_enabled ? '✅ 활성화' : '❌ 비활성화'}\n` +
-                 `📅 마지막 업데이트: ${status.last_updated}`;
+                 `📅 마지막 업데이트: ${status.last_updated}${exclusiveInfo}`;
         } else {
           return `📋 현재 세션 상태\n` +
                  `❌ 활성 세션이 없습니다.\n` +
@@ -160,11 +189,24 @@ export async function handleSessionStatus(args: SessionStatusArgs): Promise<stri
         if (detectedSessionId) {
           const context = sessionContext.getCurrentContext();
           
+          // 🚀 독점 관리자에게 세션 활성화 알림
+          let exclusiveInfo = '';
+          try {
+            const { getExclusiveManager } = await import('../session/SessionExclusiveManager.js');
+            const exclusiveManager = getExclusiveManager();
+            if (exclusiveManager) {
+              const exclusiveSession = await exclusiveManager.activateSession(detectedSessionId, 'auto_detect_active');
+              exclusiveInfo = `\n🔒 독점 세션: ${Math.floor(exclusiveSession.timeRemaining / 60)}분 동안 유지`;
+            }
+          } catch (exclusiveError) {
+            console.warn('Failed to activate exclusive session on detect:', exclusiveError);
+          }
+          
           return `✅ 활성 세션이 감지되어 설정되었습니다.\n` +
                  `🆔 세션 ID: ${detectedSessionId}\n` +
                  `📁 프로젝트: ${context.project_name || 'Unknown'}\n` +
                  `📂 경로: ${context.project_path || 'Unknown'}\n` +
-                 `🔗 자동 연결: ${context.auto_link_enabled ? '활성화' : '비활성화'}`;
+                 `🔗 자동 연결: ${context.auto_link_enabled ? '활성화' : '비활성화'}${exclusiveInfo}`;
         } else {
           return `ℹ️ 활성 세션을 찾을 수 없습니다.\n` +
                  `💡 새로운 세션을 생성하거나 기존 세션을 활성화하세요.\n` +

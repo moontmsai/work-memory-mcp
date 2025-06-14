@@ -3,6 +3,8 @@
  */
 
 import { DatabaseConnection } from '../types/database';
+import { getExclusiveManager } from './SessionExclusiveManager.js';
+import { logger } from '../utils/logger.js';
 // 직접 enum 정의로 경로 문제 해결
 enum SessionStatus {
   ACTIVE = 'active',
@@ -260,6 +262,12 @@ export class SessionMemoryLinker {
           // 기존 세션 재활성화 및 링크
           await reactivateSession(this.connection, similarSession.session_id);
           
+          // 🚀 독점 관리자에게 기존 세션 활성화 알림
+          const exclusiveManager = getExclusiveManager();
+          if (exclusiveManager) {
+            await exclusiveManager.activateSession(similarSession.session_id, 'smart_reuse_session');
+          }
+          
           const linkResult = await this.autoLinkMemoryToSession(
             memoryId, 
             similarSession.session_id, 
@@ -304,6 +312,12 @@ export class SessionMemoryLinker {
         0, // memory_count
         0  // total_work_time
       ]);
+
+      // 🚀 독점 관리자에게 새 세션 활성화 알림
+      const exclusiveManager = getExclusiveManager();
+      if (exclusiveManager) {
+        await exclusiveManager.activateSession(newSessionId, 'smart_new_session');
+      }
 
       // 4. 메모리를 새 세션에 링크
       const linkResult = await this.autoLinkMemoryToSession(

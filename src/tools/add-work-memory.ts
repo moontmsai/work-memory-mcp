@@ -286,6 +286,17 @@ export async function handleAddWorkMemory(args: AddWorkMemoryArgs): Promise<stri
               'UPDATE work_memories SET session_id = ? WHERE id = ?',
               [currentSessionId, memoryId]
             );
+            
+            // 🚀 독점 관리자에게 세션 활동 알림 (같은 세션 연장)
+            try {
+              const { getExclusiveManager } = await import('../session/SessionExclusiveManager.js');
+              const exclusiveManager = getExclusiveManager();
+              if (exclusiveManager) {
+                await exclusiveManager.extendSession(currentSessionId, 'memory_save');
+              }
+            } catch (exclusiveError) {
+              console.warn('Failed to update exclusive session:', exclusiveError);
+            }
           }
         } else {
           // 🚀 스마트 세션 자동 생성 및 링크 (내용 분석 기반)
@@ -310,6 +321,9 @@ export async function handleAddWorkMemory(args: AddWorkMemoryArgs): Promise<stri
               'UPDATE work_memories SET session_id = ? WHERE id = ?',
               [smartResult.session_id, memoryId]
             );
+            
+            // 🚀 독점 관리자 호출은 이미 SessionMemoryLinker에서 처리됨
+            // (activateSession이 smartAutoLinkToSession에서 호출됨)
           }
         }
       }

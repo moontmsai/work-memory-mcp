@@ -108,6 +108,7 @@ import {
 import { OptimizedMemoryManager } from './utils/optimized-memory.js';
 import { ErrorRecoveryManager } from './utils/error-recovery.js';
 import { databaseManager, initializeDatabase, getDatabaseConnection, closeDatabaseConnection } from './database/index.js';
+import { initializeExclusiveManager } from './session/SessionExclusiveManager.js';
 
 // checkpoint 스케줄러는 better-sqlite3 환경에서 불필요
 import { join } from 'path';
@@ -188,6 +189,14 @@ class WorkMemoryServer {
       
       // better-sqlite3는 즉시 파일에 쓰므로 체크포인트 스케줄러 불필요
       logger.serverStatus('Database initialization completed (better-sqlite3)');
+      
+      // 🚀 세션 독점 관리자 초기화 (30분 타임아웃)
+      try {
+        initializeExclusiveManager(connection, 30 * 60 * 1000); // 30분
+        logger.serverStatus('Session Exclusive Manager initialized (30 min timeout)');
+      } catch (exclusiveError) {
+        logger.warn('INITIALIZATION', 'Failed to initialize Session Exclusive Manager', {}, exclusiveError as Error);
+      }
       
       // 주기적 공간 회수 스케줄러 시작 (1시간마다) - 성능 최적화를 위해 비활성화
       // this.startVacuumScheduler();
