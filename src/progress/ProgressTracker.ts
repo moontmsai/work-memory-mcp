@@ -5,13 +5,7 @@
 
 import { EventEmitter } from 'events';
 
-// SSE 연동을 위한 타입 (런타임에 주입)
-export interface SSEStreamManager {
-  sendProgress(taskId: string, progress: number, processed?: number, total?: number, message?: string, details?: string): void;
-  sendTaskStart(taskId: string, operation: string, metadata?: any): void;
-  sendTaskComplete(taskId: string, result?: any, metadata?: any): void;
-  sendTaskError(taskId: string, error: string, metadata?: any): void;
-}
+// SSE 기능이 제거되었습니다 - 진행률 추적은 EventEmitter를 통해서만 제공됩니다
 
 // 진행률 정보 인터페이스
 export interface ProgressInfo {
@@ -45,14 +39,9 @@ export class ProgressTracker extends EventEmitter {
   private tasks: Map<string, ProgressInfo> = new Map();
   private callbacks: Map<string, ProgressCallback[]> = new Map();
   private timers: Map<string, NodeJS.Timeout> = new Map();
-  private sseManager: SSEStreamManager | null = null;
+  // SSE 연동 제거됨 - 진행률은 EventEmitter 이벤트로만 제공
 
-  /**
-   * SSE 매니저 설정 (런타임 주입)
-   */
-  setSSEManager(sseManager: SSEStreamManager): void {
-    this.sseManager = sseManager;
-  }
+  // SSE 연동 기능이 제거되었습니다
 
   /**
    * 새 작업 시작
@@ -70,13 +59,7 @@ export class ProgressTracker extends EventEmitter {
     this.tasks.set(options.taskId, taskInfo);
     this.emit('taskStarted', taskInfo);
     
-    // SSE로 작업 시작 알림
-    if (this.sseManager) {
-      this.sseManager.sendTaskStart(options.taskId, 'unknown', {
-        totalItems: options.totalItems,
-        updateInterval: options.updateInterval
-      });
-    }
+    // 진행률은 EventEmitter 이벤트로만 제공됩니다
     
     // 초기 진행률 전송
     this.notifyProgress(options.taskId);
@@ -137,15 +120,7 @@ export class ProgressTracker extends EventEmitter {
     this.notifyProgress(taskId);
     this.emit('taskCompleted', task);
 
-    // SSE로 작업 완료 알림
-    if (this.sseManager) {
-      this.sseManager.sendTaskComplete(taskId, {
-        finalMessage: task.stage,
-        itemsProcessed: task.itemsProcessed,
-        totalItems: task.totalItems,
-        duration: task.lastUpdate.getTime() - task.startTime.getTime()
-      });
-    }
+    // 진행률 완료는 EventEmitter 이벤트로만 제공됩니다
 
     // 정리
     this.cleanupTask(taskId);
@@ -164,14 +139,7 @@ export class ProgressTracker extends EventEmitter {
     this.notifyProgress(taskId);
     this.emit('taskFailed', { task, error });
 
-    // SSE로 작업 오류 알림
-    if (this.sseManager) {
-      this.sseManager.sendTaskError(taskId, error, {
-        itemsProcessed: task.itemsProcessed,
-        totalItems: task.totalItems,
-        duration: task.lastUpdate.getTime() - task.startTime.getTime()
-      });
-    }
+    // 진행률 오류는 EventEmitter 이벤트로만 제공됩니다
 
     // 정리
     this.cleanupTask(taskId);
@@ -232,17 +200,7 @@ export class ProgressTracker extends EventEmitter {
       });
     }
 
-    // SSE로 진행률 전송
-    if (this.sseManager) {
-      this.sseManager.sendProgress(
-        taskId,
-        task.progress,
-        task.itemsProcessed,
-        task.totalItems,
-        task.stage,
-        task.details
-      );
-    }
+    // 진행률은 EventEmitter 이벤트로만 제공됩니다
 
     // 이벤트 발생
     this.emit('progressUpdate', task);
