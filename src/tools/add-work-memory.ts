@@ -130,7 +130,7 @@ export async function handleAddWorkMemory(args: AddWorkMemoryArgs): Promise<stri
     // 자동 서머리 생성
     const extractedContent = generateSummary(content, 200);
 
-    // 1. 메인 메모리 INSERT - 즉시 실행
+    // 1. 메인 메모리 INSERT - session_id는 나중에 업데이트
     await connection.run(`
       INSERT INTO work_memories (
         id, content, extracted_content, project, tags, importance_score, created_by,
@@ -246,13 +246,15 @@ export async function handleAddWorkMemory(args: AddWorkMemoryArgs): Promise<stri
       console.warn('Failed to create initial version:', versionError);
     }
 
-    // 7. 세션 자동 연동 (세션 시스템이 활성화된 경우)
+    // 세션 자동 연동 (세션 시스템이 활성화된 경우)
     let sessionLinkResult: { 
       success: boolean; 
       session_id?: string; 
       created_session?: boolean;
       session_name?: string;
       reused_session?: boolean;
+      session_error?: string; // 디버깅용
+      debug_info?: string; // 디버깅용
     } = { success: false };
     try {
       const { getSessionContext } = await import('../session/SessionContextManager.js');
@@ -260,11 +262,16 @@ export async function handleAddWorkMemory(args: AddWorkMemoryArgs): Promise<stri
       
       const sessionContext = getSessionContext(connection);
       
+      // 디버깅 정보 추가
+      const autoLinkEnabled = sessionContext.isAutoLinkEnabled();
+      sessionLinkResult.debug_info = `Auto-link enabled: ${autoLinkEnabled}`;
+      
       if (sessionContext.isAutoLinkEnabled()) {
         const memoryLinker = new SessionMemoryLinker(connection);
         
         // 현재 활성 세션 확인 또는 자동 감지
         const currentSessionId = sessionContext.getCurrentSessionId();
+        sessionLinkResult.debug_info += `, Current session: ${currentSessionId || 'none'}`;
         
         if (currentSessionId) {
           // 현재 세션에 직접 링크
@@ -272,8 +279,17 @@ export async function handleAddWorkMemory(args: AddWorkMemoryArgs): Promise<stri
             reason: 'auto_link_on_save'
           });
           sessionLinkResult.session_id = currentSessionId;
+          
+          // 해삼씨 계획대로: session_id를 work_memories 테이블에 실제로 저장!
+          if (sessionLinkResult.success) {
+            await connection.run(
+              'UPDATE work_memories SET session_id = ? WHERE id = ?',
+              [currentSessionId, memoryId]
+            );
+          }
         } else {
           // 🚀 스마트 세션 자동 생성 및 링크 (내용 분석 기반)
+          sessionLinkResult.debug_info += ', Calling smartAutoLinkToSession';
           const smartResult = await memoryLinker.smartAutoLinkToSession(memoryId, content, {
             project_name: project || undefined,
             project_path: process.cwd()
@@ -284,13 +300,24 @@ export async function handleAddWorkMemory(args: AddWorkMemoryArgs): Promise<stri
             session_id: smartResult.session_id,
             created_session: smartResult.created_session,
             session_name: smartResult.session_name,
-            reused_session: smartResult.reused_session
+            reused_session: smartResult.reused_session,
+            debug_info: sessionLinkResult.debug_info + `, Smart result: ${JSON.stringify(smartResult)}`
           };
+          
+          // 해삼씨 계획대로: session_id를 work_memories 테이블에 실제로 저장!
+          if (smartResult.success && smartResult.session_id) {
+            await connection.run(
+              'UPDATE work_memories SET session_id = ? WHERE id = ?',
+              [smartResult.session_id, memoryId]
+            );
+          }
         }
       }
     } catch (sessionError) {
       // 세션 연동 실패는 메모리 생성을 방해하지 않음
       console.warn('Failed to link memory to session:', sessionError);
+      // 디버깅을 위해 에러 메시지를 결과에 포함
+      sessionLinkResult.session_error = sessionError instanceof Error ? sessionError.message : String(sessionError);
     }
 
     const projectInfo = project ? ` (프로젝트: ${project})` : '';
@@ -322,6 +349,14 @@ export async function handleAddWorkMemory(args: AddWorkMemoryArgs): Promise<stri
                             sessionLinkResult.reused_session ? ' (기존 세션 재사용)' : '';
       const sessionName = sessionLinkResult.session_name ? ` [${sessionLinkResult.session_name}]` : '';
       result += `\n${sessionIcon} 세션 연동: ${sessionLinkResult.session_id.substring(0, 25)}...${sessionName}${sessionStatus}`;
+    }
+    
+    // 디버깅 정보 대시 표시
+    if (sessionLinkResult.debug_info || sessionLinkResult.session_error) {
+      result += `\n🔍 세션 디버그: ${sessionLinkResult.debug_info || ''}`;
+      if (sessionLinkResult.session_error) {
+        result += ` | 에러: ${sessionLinkResult.session_error}`;
+      }
     }
     
     if (context) {

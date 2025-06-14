@@ -200,57 +200,74 @@ export async function handleListWorkMemories(args: ListWorkMemoriesArgs = {}): P
       );
     }
 
-    // WHERE 조건 구성 - 해삼씨 계획대로 명시적 테이블명 사용
-    const tablePrefix = includeSessionInfo ? 'wm.' : '';
-    const whereConditions: string[] = [`${tablePrefix}is_archived = 0`];
+    // WHERE 조건 구성
+    const whereConditions: string[] = ['is_archived = 0']; // archived 대신 is_archived 사용
     const params: any[] = [];
 
     if (args.project) {
-      whereConditions.push(`${tablePrefix}project = ?`);
+      whereConditions.push('project = ?');
       params.push(args.project);
     }
 
     if (args.importance_score !== undefined) {
-      whereConditions.push(`${tablePrefix}importance_score = ?`);
+      whereConditions.push('importance_score = ?');
       params.push(args.importance_score);
     }
 
     if (args.min_importance_score !== undefined) {
-      whereConditions.push(`${tablePrefix}importance_score >= ?`);
+      whereConditions.push('importance_score >= ?');
       params.push(args.min_importance_score);
     }
 
     if (args.max_importance_score !== undefined) {
-      whereConditions.push(`${tablePrefix}importance_score <= ?`);
+      whereConditions.push('importance_score <= ?');
       params.push(args.max_importance_score);
     }
 
     if (args.created_by) {
-      whereConditions.push(`${tablePrefix}created_by = ?`);
+      whereConditions.push('created_by = ?');
       params.push(args.created_by);
     }
 
     if (args.search_keyword) {
-      whereConditions.push(`${tablePrefix}content LIKE ?`);
+      whereConditions.push('content LIKE ?');
       params.push(`%${args.search_keyword}%`);
     }
 
     // work_type 필터
     if (args.work_type) {
-      whereConditions.push(`${tablePrefix}work_type = ?`);
+      whereConditions.push('work_type = ?');
       params.push(args.work_type);
     }
 
     // worked 필터
     if (args.worked) {
-      whereConditions.push(`${tablePrefix}worked = ?`);
+      whereConditions.push('worked = ?');
       params.push(args.worked);
     }
 
-    // session_id 필터 - 해샜씨 계획대로 work_memories.session_id 직접 사용!
+    // session_id 필터 (특정 세션의 메모리만 조회)
     if (args.session_id) {
-      whereConditions.push(`${tablePrefix}session_id = ?`);
-      params.push(args.session_id);
+      // work_memories 테이블에 session_id 컴럼이 있는지 먼저 확인
+      try {
+        const hasSessionColumn = await connection.get(
+          "SELECT name FROM pragma_table_info('work_memories') WHERE name = 'session_id'"
+        );
+        
+        if (hasSessionColumn) {
+          // work_memories 테이블에 session_id 컴럼이 있는 경우
+          whereConditions.push('session_id = ?');
+          params.push(args.session_id);
+        } else {
+          // change_history 테이블을 통해 세션 연결 찾기
+          whereConditions.push('id IN (SELECT DISTINCT memory_id FROM change_history WHERE session_id = ?)');
+          params.push(args.session_id);
+        }
+      } catch (error) {
+        // 오류 발생 시 change_history 방식으로 폴백
+        whereConditions.push('id IN (SELECT DISTINCT memory_id FROM change_history WHERE session_id = ?)');
+        params.push(args.session_id);
+      }
     }
 
     // 시간 범위 필터
@@ -276,7 +293,7 @@ export async function handleListWorkMemories(args: ListWorkMemoriesArgs = {}): P
       }
       
       if (dateThreshold) {
-        whereConditions.push(`${tablePrefix}created_at >= ?`);
+        whereConditions.push('created_at >= ?');
         params.push(dateThreshold);
       }
     }
@@ -284,7 +301,7 @@ export async function handleListWorkMemories(args: ListWorkMemoriesArgs = {}): P
     // 태그 필터 (AND 조건)
     if (args.tags && args.tags.length > 0) {
       for (const tag of args.tags) {
-        whereConditions.push(`${tablePrefix}tags LIKE ?`);
+        whereConditions.push('tags LIKE ?');
         params.push(`%"${tag}"%`);
       }
     }
@@ -306,14 +323,8 @@ export async function handleListWorkMemories(args: ListWorkMemoriesArgs = {}): P
     const finalSortBy = validSortColumns.includes(sortBy) ? sortBy : 'updated_at';
     const finalSortOrder = sortOrder === 'asc' ? 'ASC' : 'DESC';
 
-    // 총 개수 조회 - 세션 정보 포함 여부에 따라 다르게 처리
-    let totalCountQuery: string;
-    if (includeSessionInfo) {
-      totalCountQuery = `SELECT COUNT(*) as count FROM work_memories wm LEFT JOIN work_sessions ws ON wm.session_id = ws.session_id ${whereClause}`;
-    } else {
-      totalCountQuery = `SELECT COUNT(*) as count FROM work_memories ${whereClause}`;
-    }
-    
+    // 총 개수 조회
+    const totalCountQuery = `SELECT COUNT(*) as count FROM work_memories ${whereClause}`;
     const totalResult = await connection.get(totalCountQuery, params);
     const totalCount = totalResult?.count || 0;
 
@@ -332,20 +343,31 @@ export async function handleListWorkMemories(args: ListWorkMemoriesArgs = {}): P
       ? 'content, extracted_content'  // 전체 내용 필요시에만
       : 'extracted_content';          // 기본은 서머리만 (토큰 절약)
 
-    // 세션 정보 포함 여부에 따른 쿼리 구성 - 해삼씨 계획대로!
+    // 세션 정보 포함 여부에 따른 쿼리 구성
     let selectQuery: string;
     if (includeSessionInfo) {
-      // 해삼씨 계획대로: work_memories.session_id를 직접 사용하여 세션 정보 조인
+      // 세션 정보를 포함한 쿼리
       selectQuery = `
-        SELECT 
+        SELECT DISTINCT
           wm.id, wm.${contentSelect}, wm.project, wm.tags, wm.importance_score, wm.created_by,
           wm.created_at, wm.updated_at, wm.access_count, wm.last_accessed_at, wm.is_archived,
           wm.context, wm.requirements, wm.result_content, wm.work_type, wm.worked,
-          wm.session_id,
-          ws.project_name as session_project_name, ws.project_path,
+          ws.session_id, ws.project_name as session_project_name, ws.project_path,
           ws.status as session_status, ws.description as session_description
         FROM work_memories wm
-        LEFT JOIN work_sessions ws ON wm.session_id = ws.session_id
+        LEFT JOIN (
+          -- work_memories 테이블에 session_id 컴럼이 있는지 확인 후 적절한 JOIN 사용
+          SELECT DISTINCT 
+            ch.memory_id,
+            ws.session_id,
+            ws.project_name,
+            ws.project_path,
+            ws.status,
+            ws.description
+          FROM change_history ch
+          INNER JOIN work_sessions ws ON ch.session_id = ws.session_id
+          WHERE ch.session_id IS NOT NULL
+        ) ws ON wm.id = ws.memory_id
         ${whereClause}
         ORDER BY wm.${finalSortBy} ${finalSortOrder}
         LIMIT ? OFFSET ?
@@ -356,7 +378,7 @@ export async function handleListWorkMemories(args: ListWorkMemoriesArgs = {}): P
         SELECT 
           id, ${contentSelect}, project, tags, importance_score, created_by,
           created_at, updated_at, access_count, last_accessed_at, is_archived,
-          context, requirements, result_content, work_type, worked, session_id
+          context, requirements, result_content, work_type, worked
         FROM work_memories 
         ${whereClause}
         ORDER BY ${finalSortBy} ${finalSortOrder}
@@ -429,7 +451,7 @@ export async function handleListWorkMemories(args: ListWorkMemoriesArgs = {}): P
       result += `   📅 생성: ${formatHumanReadableDate(memory.created_at)}\n`;
       result += `   👁️ 접근: ${memory.access_count}회\n`;
       
-      // 세션 정보 표시 - 해삼씨 계획대로 연동된 세션 정보 함께 표시!
+      // 세션 정보 표시 (포함된 경우)
       if (includeSessionInfo && memory.session_id) {
         const sessionStatusEmoji = {
           'active': '🟢',
@@ -439,21 +461,13 @@ export async function handleListWorkMemories(args: ListWorkMemoriesArgs = {}): P
         };
         
         const statusEmoji = sessionStatusEmoji[memory.session_status] || '⚪';
-        const sessionName = memory.session_project_name || memory.session_id.substring(0, 12) + '...';
-        result += `   🔗 세션: ${statusEmoji} ${sessionName}\n`;
+        result += `   🔗 세션: ${statusEmoji} ${memory.session_project_name || memory.session_id.substring(0, 12)}...\n`;
         
         if (memory.project_path) {
           result += `   📂 경로: ${memory.project_path}\n`;
         }
-        
-        if (memory.session_description) {
-          result += `   💬 설명: ${memory.session_description.substring(0, 50)}${memory.session_description.length > 50 ? '...' : ''}\n`;
-        }
       } else if (includeSessionInfo) {
         result += `   🔗 세션: 연결되지 않음\n`;
-      } else if (memory.session_id) {
-        // 세션 정보는 포함하지 않지만 세션 ID는 간단히 표시
-        result += `   🔗 세션: ${memory.session_id.substring(0, 12)}...\n`;
       }
       
       result += '\n';
@@ -468,27 +482,22 @@ export async function handleListWorkMemories(args: ListWorkMemoriesArgs = {}): P
       result += ` (다음 페이지: offset=${offset + limit})`;
     }
 
-    // 통계 정보 (선택적) - 세션 정보 포함 여부에 따라 테이블 접두사 사용
+    // 통계 정보 (선택적)
     if (includeStats && totalCount > 0) {
-      const statsTablePrefix = includeSessionInfo ? 'wm.' : '';
-      const statsFromClause = includeSessionInfo 
-        ? 'FROM work_memories wm LEFT JOIN work_sessions ws ON wm.session_id = ws.session_id'
-        : 'FROM work_memories';
-      
       const statsQuery = `
         SELECT 
-          COUNT(CASE WHEN ${statsTablePrefix}importance_score >= 90 THEN 1 END) as critical_count,
-          COUNT(CASE WHEN ${statsTablePrefix}importance_score >= 70 AND ${statsTablePrefix}importance_score < 90 THEN 1 END) as high_count,
-          COUNT(CASE WHEN ${statsTablePrefix}importance_score >= 30 AND ${statsTablePrefix}importance_score < 70 THEN 1 END) as medium_count,
-          COUNT(CASE WHEN ${statsTablePrefix}importance_score >= 10 AND ${statsTablePrefix}importance_score < 30 THEN 1 END) as low_count,
-          COUNT(CASE WHEN ${statsTablePrefix}importance_score < 10 THEN 1 END) as minimal_count,
-          COUNT(DISTINCT ${statsTablePrefix}project) as project_count,
-          SUM(${statsTablePrefix}access_count) as total_access_count,
-          AVG(${statsTablePrefix}importance_score) as avg_importance_score,
-          MAX(${statsTablePrefix}importance_score) as max_importance_score,
-          MIN(${statsTablePrefix}importance_score) as min_importance_score
-        ${statsFromClause}
-        WHERE ${statsTablePrefix}is_archived = 0
+          COUNT(CASE WHEN importance_score >= 90 THEN 1 END) as critical_count,
+          COUNT(CASE WHEN importance_score >= 70 AND importance_score < 90 THEN 1 END) as high_count,
+          COUNT(CASE WHEN importance_score >= 30 AND importance_score < 70 THEN 1 END) as medium_count,
+          COUNT(CASE WHEN importance_score >= 10 AND importance_score < 30 THEN 1 END) as low_count,
+          COUNT(CASE WHEN importance_score < 10 THEN 1 END) as minimal_count,
+          COUNT(DISTINCT project) as project_count,
+          SUM(access_count) as total_access_count,
+          AVG(importance_score) as avg_importance_score,
+          MAX(importance_score) as max_importance_score,
+          MIN(importance_score) as min_importance_score
+        FROM work_memories 
+        WHERE is_archived = 0
       `;
       
       const stats = await connection.get(statsQuery);
@@ -515,4 +524,4 @@ export async function handleListWorkMemories(args: ListWorkMemoriesArgs = {}): P
     
     return `❌ 메모리 목록 조회 중 오류가 발생했습니다: ${error instanceof Error ? error.message : '알 수 없는 오류'}`;
   }
-}
+} 

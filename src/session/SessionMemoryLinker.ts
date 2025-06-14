@@ -3,7 +3,13 @@
  */
 
 import { DatabaseConnection } from '../types/database';
-import { SessionStatus, Session } from '../types/session';
+// 직접 enum 정의로 경로 문제 해결
+enum SessionStatus {
+  ACTIVE = 'active',
+  PAUSED = 'paused',
+  COMPLETED = 'completed',
+  CANCELLED = 'cancelled'
+}
 
 /**
  * 작업기억 내용을 분석하여 의미있는 세션명 제안

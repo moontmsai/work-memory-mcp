@@ -24,9 +24,12 @@ export const SCHEMA_SQL = {
       result_content TEXT, -- 작업 결과물
       work_type TEXT CHECK(work_type IN ('memory', 'todo')) DEFAULT 'memory', -- 작업 유형
       worked TEXT CHECK(worked IN ('완료', '미완료')), -- 작업 완료 상태
+      -- 세션 연동 필드
+      session_id TEXT, -- work_sessions 테이블과 연동
       -- 검색 최적화를 위한 추가 필드
       content_length INTEGER GENERATED ALWAYS AS (length(content)) STORED,
-      project_normalized TEXT GENERATED ALWAYS AS (lower(trim(project))) STORED
+      project_normalized TEXT GENERATED ALWAYS AS (lower(trim(project))) STORED,
+      FOREIGN KEY (session_id) REFERENCES work_sessions(session_id) ON DELETE SET NULL
     );
   `,
 
@@ -170,6 +173,7 @@ export const SCHEMA_SQL = {
     'CREATE INDEX IF NOT EXISTS idx_work_memories_content_length ON work_memories(content_length);',
     'CREATE INDEX IF NOT EXISTS idx_work_memories_work_type ON work_memories(work_type);',
     'CREATE INDEX IF NOT EXISTS idx_work_memories_worked ON work_memories(worked);',
+    'CREATE INDEX IF NOT EXISTS idx_work_memories_session_id ON work_memories(session_id);',
     
     // search_keywords 테이블 인덱스
     'CREATE INDEX IF NOT EXISTS idx_search_keywords_memory_id ON search_keywords(memory_id);',
@@ -300,6 +304,10 @@ async function migrateToDoFields(connection: DatabaseConnection): Promise<void> 
       await connection.run('ALTER TABLE work_memories ADD COLUMN worked TEXT CHECK(worked IN (\'완료\', \'미완료\'));');
     }
 
+    if (!existingColumns.includes('session_id')) {
+      await connection.run('ALTER TABLE work_memories ADD COLUMN session_id TEXT;');
+    }
+
     // importance 필드를 importance_score로 마이그레이션
     await migrateImportanceToScore(connection, existingColumns);
 
@@ -310,6 +318,9 @@ async function migrateToDoFields(connection: DatabaseConnection): Promise<void> 
     await connection.run('CREATE INDEX IF NOT EXISTS idx_work_memories_worked ON work_memories(worked);');
     await connection.run('CREATE INDEX IF NOT EXISTS idx_work_memories_worked_score ON work_memories(worked, importance_score DESC);');
     await connection.run('CREATE INDEX IF NOT EXISTS idx_work_memories_worktype_worked ON work_memories(work_type, worked);');
+    
+    // session_id 인덱스 추가
+    await connection.run('CREATE INDEX IF NOT EXISTS idx_work_memories_session_id ON work_memories(session_id);');
     
   } catch (error) {
     // 마이그레이션 실패는 경고만 출력하고 계속 진행
