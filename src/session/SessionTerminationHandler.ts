@@ -335,9 +335,9 @@ export class SessionTerminationHandler {
       const backupId = `backup_${session.session_id}_${Date.now()}`;
       
       // 세션 데이터 백업
-      await this.connection.query(`
+      await this.connection.run(`
         INSERT INTO session_backups (
-          backup_id, original_session_id, session_data, 
+          backup_id, original_session_id, session_data,
           memories_data, backup_reason, created_at
         ) VALUES (?, ?, ?, ?, ?, ?)
       `, [
@@ -397,7 +397,7 @@ export class SessionTerminationHandler {
         // TODO를 일반 메모리로 전환하고 미완료 표시 추가
         const updatedContent = `${memory.content}\n\n[자동 종료시 미완료 상태로 기록됨 - ${context.timestamp}]`;
         
-        await this.connection.query(
+        await this.connection.run(
           'UPDATE work_memories SET work_type = "memory", content = ?, updated_at = ? WHERE id = ?',
           [updatedContent, context.timestamp, memory.id]
         );
@@ -441,7 +441,7 @@ export class SessionTerminationHandler {
       }
 
       // 2. 세션-메모리 링크 제거 (연결만 제거, 메모리는 보존)
-      const linksRemoved = await this.connection.query(
+      const linksRemoved = await this.connection.run(
         'DELETE FROM session_memory_links WHERE session_id = ?',
         [session.session_id]
       );
@@ -484,7 +484,7 @@ export class SessionTerminationHandler {
 
       // 고아 메모리들을 아카이브하거나 삭제
       for (const memory of orphanedMemories) {
-        await this.connection.query(
+        await this.connection.run(
           'UPDATE work_memories SET archived = 1, updated_at = ? WHERE id = ?',
           [new Date().toISOString(), memory.id]
         );
@@ -508,7 +508,7 @@ export class SessionTerminationHandler {
   private async cleanupTemporaryData(sessionId: string): Promise<void> {
     try {
       // 임시 세션 데이터 삭제
-      await this.connection.query(
+      await this.connection.run(
         'DELETE FROM session_temp_data WHERE session_id = ?',
         [sessionId]
       );
@@ -524,7 +524,7 @@ export class SessionTerminationHandler {
   private async clearSessionCache(sessionId: string): Promise<void> {
     try {
       // 세션 관련 캐시 엔트리 삭제
-      await this.connection.query(
+      await this.connection.run(
         'DELETE FROM session_cache WHERE session_id = ?',
         [sessionId]
       );
@@ -545,8 +545,8 @@ export class SessionTerminationHandler {
     const endedAt = context.timestamp;
     const totalWorkTime = this.calculateTotalWorkTime(session, endedAt);
 
-    await this.connection.query(`
-      UPDATE work_sessions 
+    await this.connection.run(`
+      UPDATE work_sessions
       SET status = ?, ended_at = ?, updated_at = ?, total_work_time = ?
       WHERE session_id = ?
     `, [
@@ -639,9 +639,9 @@ export class SessionTerminationHandler {
     cleanupResult: CleanupResult
   ): Promise<void> {
     try {
-      await this.connection.query(`
+      await this.connection.run(`
         INSERT INTO session_termination_log (
-          session_id, termination_reason, initiated_by, 
+          session_id, termination_reason, initiated_by,
           forced, cleanup_success, memories_processed,
           links_removed, execution_time_ms, created_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)

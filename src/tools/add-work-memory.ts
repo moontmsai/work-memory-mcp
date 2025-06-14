@@ -114,11 +114,11 @@ export async function handleAddWorkMemory(args: AddWorkMemoryArgs): Promise<stri
     // 할일 관리 필드
     const context = args.context?.trim() || null;
     const requirements = args.requirements?.trim() || null;
-    const resultContent = args.result_content?.trim() || null;
+    const resultContent = args.result_content?.trim();
     const workType = args.work_type || 'memory';
 
     // worked 상태 결정 (자동 감지 또는 명시적 값)
-    const worked = determineOptimalWorkedStatus(workType, resultContent, args.worked);
+    const worked = determineOptimalWorkedStatus(workType, resultContent ?? undefined, args.worked);
 
     // 할일 저장 시 context 필수 검증
     if (workType === 'todo') {

@@ -166,7 +166,7 @@ export class SessionContextManager {
   private async updateSessionActivity(sessionId: string): Promise<void> {
     try {
       const now = new Date().toISOString();
-      await this.connection.query(
+      await this.connection.run(
         'UPDATE work_sessions SET last_activity_at = ?, updated_at = ? WHERE session_id = ?',
         [now, now, sessionId]
       );

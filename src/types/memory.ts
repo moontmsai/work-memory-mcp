@@ -10,6 +10,10 @@ export interface WorkMemory {
   created_at: string;
   updated_at: string;
   created_by: 'claude_app' | 'cursor_ai' | string;
+  /**
+   * 연결된 세션 ID (없을 수 있음)
+   */
+  session_id?: string;
   last_accessed_by?: string | undefined;
   access_count: number;
   importance_score: number; // 0-100 범위의 중요도 점수

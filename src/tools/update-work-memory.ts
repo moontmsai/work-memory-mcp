@@ -121,7 +121,7 @@ export async function handleUpdateWorkMemory(args: UpdateWorkMemoryArgs): Promis
     const updatedBy = args.updated_by || 'unknown';
     
     // 변경사항 추적을 위한 기존 데이터
-    const oldData: WorkMemory = {
+    const oldData: WorkMemory & { session_id?: string } = {
       id: existingMemory.id,
       content: existingMemory.content,
       project: existingMemory.project,
@@ -129,6 +129,7 @@ export async function handleUpdateWorkMemory(args: UpdateWorkMemoryArgs): Promis
       created_at: existingMemory.created_at,
       updated_at: existingMemory.updated_at,
       created_by: existingMemory.created_by,
+      session_id: existingMemory.session_id,
       access_count: existingMemory.access_count,
       importance_score: existingMemory.importance_score
     };
@@ -372,7 +373,7 @@ export async function handleUpdateWorkMemory(args: UpdateWorkMemoryArgs): Promis
           }
         } else if (oldData.session_id && currentSessionId && oldData.session_id !== currentSessionId) {
           // 활성 세션이 변경된 경우 세션 업데이트
-          await connection.query(
+          await connection.run(
             'UPDATE work_memories SET session_id = ?, updated_at = ? WHERE id = ?',
             [currentSessionId, new Date().toISOString(), args.memory_id]
           );
