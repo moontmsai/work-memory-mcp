@@ -15,19 +15,16 @@ export function generateMemoryId(): string {
  * 텍스트에서 키워드 추출
  */
 export function extractKeywords(text: string, maxKeywords: number = 10): string[] {
-  // 한글, 영문, 숫자를 포함한 단어들 추출
-  const words = text
+  const wordFreq = new Map<string, number>();
+
+  text
     .toLowerCase()
     .replace(/[^\w\sㄱ-ㅎㅏ-ㅣ가-힣]/g, ' ')
     .split(/\s+/)
-    .filter(word => word.length >= 2)
-    .filter(word => !isStopWord(word));
-
-  // 중복 제거 및 빈도순 정렬
-  const wordFreq = new Map<string, number>();
-  words.forEach(word => {
-    wordFreq.set(word, (wordFreq.get(word) || 0) + 1);
-  });
+    .forEach(word => {
+      if (word.length < 2 || isStopWord(word)) return;
+      wordFreq.set(word, (wordFreq.get(word) || 0) + 1);
+    });
 
   return Array.from(wordFreq.entries())
     .sort((a, b) => b[1] - a[1])
@@ -38,8 +35,7 @@ export function extractKeywords(text: string, maxKeywords: number = 10): string[
 /**
  * 불용어 체크 (한국어 + 영어)
  */
-function isStopWord(word: string): boolean {
-  const stopWords = new Set([
+const STOP_WORDS = new Set([
     // 영어 불용어
     'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by',
     'from', 'as', 'is', 'was', 'are', 'were', 'be', 'been', 'being', 'have', 'has', 'had',
@@ -53,8 +49,9 @@ function isStopWord(word: string): boolean {
     '또는', '또한', '그래서', '따라서', '그런데', '하지만', '만약', '만일', '수', '때', '동안',
     '중', '안', '밖', '위', '아래', '앞', '뒤', '좌', '우', '다른', '같은', '새로운'
   ]);
-  
-  return stopWords.has(word);
+
+function isStopWord(word: string): boolean {
+  return STOP_WORDS.has(word);
 }
 
 /**
