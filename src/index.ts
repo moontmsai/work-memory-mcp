@@ -85,6 +85,25 @@ import {
   optimizeDatabaseTool,
   handleOptimizeDatabase
 } from './tools/optimize-database.js';
+
+// 세션 관리 도구들 (통합됨)
+import {
+  sessionManagerTool,
+  handleSessionManager,
+  SessionManagerArgs,
+  sessionStatusTool,
+  handleSessionStatus,
+  SessionStatusArgs,
+  // 호환성을 위한 기존 함수들
+  handleSetActiveSession,
+  SetActiveSessionArgs,
+  handleDetectActiveSession,
+  DetectActiveSessionArgs,
+  handleGetSessionContext,
+  handleSetAutoLink,
+  SetAutoLinkArgs,
+  handleClearActiveSession
+} from './tools/session-context-tools.js';
 // FileLockManager는 SQLite 전환으로 더 이상 필요 없음
 import { OptimizedMemoryManager } from './utils/optimized-memory.js';
 import { ErrorRecoveryManager } from './utils/error-recovery.js';
@@ -200,6 +219,9 @@ class WorkMemoryServer {
           batchOperationsTool,
           connectionMonitorTool,
           optimizeDatabaseTool,
+          // 세션 관리 도구들 (통합됨)
+          sessionManagerTool,
+          sessionStatusTool
         ],
       };
     });
@@ -423,6 +445,23 @@ class WorkMemoryServer {
       case 'optimize_database': {
         const dbPath = databaseManager.getDbPath();
         const result = await withErrorHandling('OPTIMIZE_DATABASE', name, () => handleOptimizeDatabase(dbPath))();
+        logger.toolExecution(name, args, startTime);
+        return {
+          content: [{ type: 'text', text: result }],
+        };
+      }
+
+      // 세션 관리 도구들 (통합됨)
+      case 'session_manager': {
+        const result = await withErrorHandling('SESSION_MANAGER', name, handleSessionManager)(args as unknown as SessionManagerArgs);
+        logger.toolExecution(name, args, startTime);
+        return {
+          content: [{ type: 'text', text: result }],
+        };
+      }
+
+      case 'session_status': {
+        const result = await withErrorHandling('SESSION_STATUS', name, handleSessionStatus)(args as unknown as SessionStatusArgs);
         logger.toolExecution(name, args, startTime);
         return {
           content: [{ type: 'text', text: result }],

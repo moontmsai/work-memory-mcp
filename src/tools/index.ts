@@ -30,20 +30,14 @@ export * from './search-utils.js';
 export * from './get-work-memory-history.js';
 export * from './get-work-memory-versions.js';
 
-// 세션 컨텍스트 관리 도구들
+// 세션 컨텍스트 관리 도구들 (통합됨)
 export * from './session-context-tools.js';
 export * from './continue-work-session.js';
 import { 
-  setActiveSessionTool,
-  handleSetActiveSession,
-  detectActiveSessionTool,
-  handleDetectActiveSession,
-  getSessionContextTool,
-  handleGetSessionContext,
-  setAutoLinkTool,
-  handleSetAutoLink,
-  clearActiveSessionTool,
-  handleClearActiveSession
+  sessionManagerTool,
+  handleSessionManager,
+  sessionStatusTool,
+  handleSessionStatus
 } from './session-context-tools.js';
 import {
   continueWorkSessionTool,
@@ -55,12 +49,9 @@ export const allTools = {
   [optimizeDatabaseTool.name]: optimizeDatabaseTool,
   [performanceAnalysisTool.name]: performanceAnalysisTool,
   
-  // 세션 컨텍스트 관리 도구들
-  [setActiveSessionTool.name]: setActiveSessionTool,
-  [detectActiveSessionTool.name]: detectActiveSessionTool,
-  [getSessionContextTool.name]: getSessionContextTool,
-  [setAutoLinkTool.name]: setAutoLinkTool,
-  [clearActiveSessionTool.name]: clearActiveSessionTool,
+  // 세션 컨텍스트 관리 도구들 (통합됨)
+  [sessionManagerTool.name]: sessionManagerTool,
+  [sessionStatusTool.name]: sessionStatusTool,
   [continueWorkSessionTool.name]: continueWorkSessionTool,
 };
 
@@ -69,11 +60,8 @@ export const allToolHandlers = {
   [optimizeDatabaseTool.name]: handleOptimizeDatabase,
   [performanceAnalysisTool.name]: handlePerformanceAnalysis,
   
-  // 세션 컨텍스트 관리 도구들
-  [setActiveSessionTool.name]: handleSetActiveSession,
-  [detectActiveSessionTool.name]: handleDetectActiveSession,
-  [getSessionContextTool.name]: handleGetSessionContext,
-  [setAutoLinkTool.name]: handleSetAutoLink,
-  [clearActiveSessionTool.name]: handleClearActiveSession,
+  // 세션 컨텍스트 관리 도구들 (통합됨)
+  [sessionManagerTool.name]: handleSessionManager,
+  [sessionStatusTool.name]: handleSessionStatus,
   [continueWorkSessionTool.name]: handleContinueWorkSession,
 };
