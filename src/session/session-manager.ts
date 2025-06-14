@@ -241,6 +241,132 @@ export class SessionManager {
   }
 
   /**
+   * 세션 삭제 (세션만)
+   */
+  async deleteSession(sessionId: string, confirm: boolean = false): Promise<{
+    success: boolean;
+    message: string;
+    memoryCount?: number;
+  }> {
+    if (!confirm) {
+      return {
+        success: false,
+        message: '❌ 세션 삭제시에는 confirm=true가 필요합니다.'
+      };
+    }
+
+    // 세션 존재 확인
+    const session = await this.getSession(sessionId);
+    if (!session) {
+      return {
+        success: false,
+        message: '❌ 세션을 찾을 수 없습니다.'
+      };
+    }
+
+    // 관련 작업기억 개수 확인
+    const memoryResult = await this.connection.get(`
+      SELECT COUNT(*) as count 
+      FROM work_memories 
+      WHERE session_id = ? AND is_archived = FALSE
+    `, [sessionId]);
+    const memoryCount = memoryResult?.count || 0;
+
+    try {
+      // 세션만 삭제 (작업기억은 유지, session_id를 NULL로 설정)
+      await this.connection.run('BEGIN TRANSACTION');
+      
+      // 작업기억의 session_id를 NULL로 변경 (연결 해제)
+      if (memoryCount > 0) {
+        await this.connection.run(`
+          UPDATE work_memories 
+          SET session_id = NULL, updated_at = ?
+          WHERE session_id = ?
+        `, [new Date().toISOString(), sessionId]);
+      }
+
+      // 세션 삭제
+      await this.connection.run(`
+        DELETE FROM work_sessions 
+        WHERE session_id = ?
+      `, [sessionId]);
+
+      await this.connection.run('COMMIT');
+
+      return {
+        success: true,
+        message: `✅ 세션 "${session.project_name}" 삭제 완료. ${memoryCount}개 작업기억은 유지됨`,
+        memoryCount
+      };
+    } catch (error) {
+      await this.connection.run('ROLLBACK');
+      throw error;
+    }
+  }
+
+  /**
+   * 세션 + 관련 작업기억 일괄 삭제 (cascade)
+   */
+  async deleteSessionWithMemories(sessionId: string, confirm: boolean = false): Promise<{
+    success: boolean;
+    message: string;
+    deletedMemoryCount?: number;
+  }> {
+    if (!confirm) {
+      return {
+        success: false,
+        message: '❌ 세션+작업기억 일괄 삭제시에는 confirm=true가 필요합니다.'
+      };
+    }
+
+    // 세션 존재 확인
+    const session = await this.getSession(sessionId);
+    if (!session) {
+      return {
+        success: false,
+        message: '❌ 세션을 찾을 수 없습니다.'
+      };
+    }
+
+    // 관련 작업기억 개수 확인
+    const memoryResult = await this.connection.get(`
+      SELECT COUNT(*) as count 
+      FROM work_memories 
+      WHERE session_id = ? AND is_archived = FALSE
+    `, [sessionId]);
+    const memoryCount = memoryResult?.count || 0;
+
+    try {
+      await this.connection.run('BEGIN TRANSACTION');
+      
+      // 작업기억 삭제
+      if (memoryCount > 0) {
+        await this.connection.run(`
+          DELETE FROM work_memories 
+          WHERE session_id = ?
+        `, [sessionId]);
+      }
+
+      // 세션 삭제
+      await this.connection.run(`
+        DELETE FROM work_sessions 
+        WHERE session_id = ?
+      `, [sessionId]);
+
+      await this.connection.run('COMMIT');
+
+      return {
+        success: true,
+        message: `✅ 세션 "${session.project_name}"과 관련 작업기억 ${memoryCount}개 모두 삭제 완료`,
+        deletedMemoryCount: memoryCount
+      };
+    } catch (error) {
+      await this.connection.run('ROLLBACK');
+      throw error;
+    }
+  }
+
+  /**
    * 스마트 세션 감지/생성
    * 해삼씨가 원하는 간단한 방식으로!
    */

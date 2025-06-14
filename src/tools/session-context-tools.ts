@@ -6,23 +6,27 @@ import { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { getDatabaseConnection } from '../database/index.js';
 import { getSessionContext } from '../session/SessionContextManager.js';
 
-// 통합 도구 1: 세션 관리 (설정, 활성화, 해제)
+// 통합 도구 1: 세션 관리 (설정, 활성화, 해제, 삭제)
 export interface SessionManagerArgs {
-  action: 'set_active' | 'clear' | 'enable_auto_link' | 'disable_auto_link';
+  action: 'set_active' | 'clear' | 'enable_auto_link' | 'disable_auto_link' | 'delete_session' | 'delete_session_cascade' | 'list_sessions';
   session_id?: string;
   project_path?: string;
+  confirm?: boolean;
+  limit?: number;
+  status?: string;
+  project_name?: string;
 }
 
 export const sessionManagerTool: Tool = {
   name: 'session_manager',
-  description: '세션을 관리합니다. 활성 세션 설정/해제, 자동 링크 활성화/비활성화를 처리합니다.',
+  description: '세션을 관리합니다. 활성 세션 설정/해제, 세션 삭제, 자동 링크 활성화/비활성화를 처리합니다.',
   inputSchema: {
     type: 'object',
     properties: {
       action: {
         type: 'string',
-        enum: ['set_active', 'clear', 'enable_auto_link', 'disable_auto_link'],
-        description: '실행할 작업: set_active(세션 활성화), clear(세션 해제), enable_auto_link(자동링크 활성화), disable_auto_link(자동링크 비활성화)'
+        enum: ['set_active', 'clear', 'enable_auto_link', 'disable_auto_link', 'delete_session', 'delete_session_cascade', 'list_sessions'],
+        description: '실행할 작업: set_active(세션 활성화), clear(세션 해제), delete_session(세션만 삭제), delete_session_cascade(세션+작업기억 일괄삭제), list_sessions(세션 목록), enable_auto_link(자동링크 활성화), disable_auto_link(자동링크 비활성화)'
       },
       session_id: {
         type: 'string',
@@ -32,6 +36,26 @@ export const sessionManagerTool: Tool = {
       project_path: {
         type: 'string',
         description: '프로젝트 경로 (선택사항)'
+      },
+      confirm: {
+        type: 'boolean',
+        description: '삭제 확인 (delete_session 또는 delete_session_cascade 시 필수)',
+        default: false
+      },
+      limit: {
+        type: 'number',
+        description: '목록 조회 시 최대 개수 (list_sessions 시 선택사항)',
+        minimum: 1,
+        maximum: 100
+      },
+      status: {
+        type: 'string',
+        description: '세션 상태 필터 (list_sessions 시 선택사항)',
+        enum: ['active', 'paused', 'completed', 'cancelled']
+      },
+      project_name: {
+        type: 'string',
+        description: '프로젝트명 필터 (list_sessions 시 선택사항)'
       }
     },
     required: ['action']
@@ -100,6 +124,90 @@ export async function handleSessionManager(args: SessionManagerArgs): Promise<st
         sessionContext.setAutoLinkEnabled(false);
         return `🔗 자동 연결이 비활성화되었습니다.\n` +
                `📝 메모리와 세션 간의 자동 연결이 중단되었습니다.`;
+      }
+
+      case 'delete_session': {
+        if (!args.session_id) {
+          throw new Error('session_id is required for delete_session action');
+        }
+        
+        const { SessionManager } = await import('../session/session-manager.js');
+        const sessionManager = new SessionManager(connection);
+        
+        const result = await sessionManager.deleteSession(args.session_id, args.confirm || false);
+        
+        if (!result.success) {
+          return result.message;
+        }
+        
+        return `✅ 세션 삭제 완료\n` +
+               `${result.message}\n` +
+               `📝 작업기억 ${result.memoryCount}개는 독립적으로 유지됩니다.`;
+      }
+
+      case 'delete_session_cascade': {
+        if (!args.session_id) {
+          throw new Error('session_id is required for delete_session_cascade action');
+        }
+        
+        const { SessionManager } = await import('../session/session-manager.js');
+        const sessionManager = new SessionManager(connection);
+        
+        const result = await sessionManager.deleteSessionWithMemories(args.session_id, args.confirm || false);
+        
+        if (!result.success) {
+          return result.message;
+        }
+        
+        return `✅ 세션 + 작업기억 일괄 삭제 완료\n` +
+               `${result.message}\n` +
+               `🗑️ 삭제된 작업기억: ${result.deletedMemoryCount}개`;
+      }
+
+      case 'list_sessions': {
+        const { SessionManager } = await import('../session/session-manager.js');
+        const sessionManager = new SessionManager(connection);
+        
+        const sessions = await sessionManager.listSessions({
+          limit: args.limit || 20,
+          status: args.status,
+          projectName: args.project_name
+        });
+        
+        if (sessions.length === 0) {
+          return `📋 세션 리스트\n` +
+                 `❌ 조건에 맞는 세션이 없습니다.`;
+        }
+        
+        let output = `📋 세션 리스트 (총 ${sessions.length}개)\n\n`;
+        
+        sessions.forEach((session, index) => {
+          const statusIcon = {
+            'active': '🟢',
+            'paused': '🟡', 
+            'completed': '✅',
+            'cancelled': '❌'
+          }[session.status] || '🔘';
+          
+          const timeInfo = session.status === 'active' 
+            ? `🔄 마지막 활동: ${new Date(session.last_activity_at).toLocaleString()}`
+            : session.ended_at 
+              ? `🏁 종료: ${new Date(session.ended_at).toLocaleString()}`
+              : `🔄 마지막: ${new Date(session.last_activity_at).toLocaleString()}`;
+          
+          output += `${index + 1}. ${statusIcon} **${session.project_name}**\n` +
+                   `   🆔 ID: ${session.session_id}\n` +
+                   `   ${timeInfo}\n` +
+                   `   📝 메모리: ${session.memory_count}개 | 📊 활동: ${session.activity_count}회\n`;
+          
+          if (session.description) {
+            output += `   💬 ${session.description}\n`;
+          }
+          
+          output += '\n';
+        });
+        
+        return output.trim();
       }
 
       default:
