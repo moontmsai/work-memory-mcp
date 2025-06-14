@@ -53,7 +53,7 @@ export function generateSummaryV2(content: string, options: SummaryOptions = {})
   const sortedSentences = scoredSentences.sort((a, b) => b.score - a.score);
   
   for (const sentenceObj of sortedSentences) {
-    const testLength = summary.length + (summary ? '. ' : '') + sentenceObj.text.length;
+    const testLength = summary.length + (summary ? 2 : 0) + sentenceObj.text.length;
     
     if (testLength > maxLength) {
       // 길이 초과시 현재 문장을 축약해서 추가할지 결정

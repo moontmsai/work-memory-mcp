@@ -121,17 +121,19 @@ export async function handleUpdateWorkMemory(args: UpdateWorkMemoryArgs): Promis
     const updatedBy = args.updated_by || 'unknown';
     
     // 변경사항 추적을 위한 기존 데이터
-    const oldData: WorkMemory = {
-      id: existingMemory.id,
-      content: existingMemory.content,
-      project: existingMemory.project,
-      tags: JSON.parse(existingMemory.tags || '[]'),
-      created_at: existingMemory.created_at,
-      updated_at: existingMemory.updated_at,
-      created_by: existingMemory.created_by,
-      access_count: existingMemory.access_count,
-      importance_score: existingMemory.importance_score
-    };
+  const oldData: WorkMemory = {
+    id: existingMemory.id,
+    content: existingMemory.content,
+    project: existingMemory.project,
+    tags: JSON.parse(existingMemory.tags || '[]'),
+    created_at: existingMemory.created_at,
+    updated_at: existingMemory.updated_at,
+    created_by: existingMemory.created_by,
+    access_count: existingMemory.access_count,
+    importance_score: existingMemory.importance_score
+  };
+
+  const oldSessionId: string | null = (existingMemory as any).session_id || null;
 
     // 업데이트 데이터 준비
     const updates: any = {
@@ -360,7 +362,7 @@ export async function handleUpdateWorkMemory(args: UpdateWorkMemoryArgs): Promis
       if (sessionContext.isAutoLinkEnabled()) {
         const currentSessionId = sessionContext.getCurrentSessionId();
         
-        if (currentSessionId && !oldData.session_id) {
+        if (currentSessionId && !oldSessionId) {
           // 현재 활성 세션이 있고 메모리가 아직 연결되지 않은 경우 자동 연결
           const memoryLinker = new SessionMemoryLinker(connection);
           const linkResult = await memoryLinker.autoLinkMemoryToSession(args.memory_id, currentSessionId, {
@@ -370,9 +372,9 @@ export async function handleUpdateWorkMemory(args: UpdateWorkMemoryArgs): Promis
           if (linkResult.success) {
             sessionUpdateInfo = `\n🔗 세션 연동: ${currentSessionId.substring(0, 20)}...`;
           }
-        } else if (oldData.session_id && currentSessionId && oldData.session_id !== currentSessionId) {
+        } else if (oldSessionId && currentSessionId && oldSessionId !== currentSessionId) {
           // 활성 세션이 변경된 경우 세션 업데이트
-          await connection.query(
+          await connection.run(
             'UPDATE work_memories SET session_id = ?, updated_at = ? WHERE id = ?',
             [currentSessionId, new Date().toISOString(), args.memory_id]
           );

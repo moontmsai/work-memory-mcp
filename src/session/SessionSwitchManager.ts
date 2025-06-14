@@ -15,7 +15,7 @@ import {
 import { DatabaseConnection } from '../database/connection.js';
 import { SessionFactory } from './SessionFactory.js';
 import { SessionStateManager } from './SessionStateManager.js';
-import { SessionQueryManager } from './SessionQueryManager.js';
+import { SessionQueryManager, QueryResult } from './SessionQueryManager.js';
 import { ProjectContextAnalyzer } from './ProjectContextAnalyzer.js';
 
 export interface SwitchManagerConfig {
@@ -90,8 +90,8 @@ export class SessionSwitchManager {
       // 2. 프로젝트 컨텍스트 분석 (optional)
       let projectContext: any = {};
       try {
-        if (this.contextAnalyzer && this.contextAnalyzer.analyzeContext) {
-          projectContext = await this.contextAnalyzer.analyzeContext(context.project_path);
+        if (this.contextAnalyzer && this.contextAnalyzer.analyzeProjectContext) {
+          projectContext = await this.contextAnalyzer.analyzeProjectContext(context.project_path);
         }
       } catch (error) {
         // 컨텍스트 분석이 실패해도 계속 진행
@@ -170,7 +170,7 @@ export class SessionSwitchManager {
    * 관련 세션 검색
    */
   private async findRelatedSessions(context: SwitchContext): Promise<WorkSession[]> {
-    const searches = [];
+    const searches: Promise<QueryResult<WorkSession>>[] = [];
 
     // 1. 프로젝트명으로 검색
     searches.push(
@@ -530,7 +530,7 @@ export class SessionSwitchManager {
       WHERE session_id = ?
     `;
     
-    await this.connection.query(sql, [
+    await this.connection.run(sql, [
       session.status,
       session.updated_at,
       session.last_activity_at,
@@ -552,7 +552,7 @@ export class SessionSwitchManager {
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
     
-    await this.connection.query(sql, [
+    await this.connection.run(sql, [
       session.session_id,
       session.project_name,
       session.project_path,
@@ -611,8 +611,8 @@ export class SessionSwitchManager {
     let projectContext: any = {};
     
     try {
-      if (this.contextAnalyzer && this.contextAnalyzer.analyzeContext) {
-        projectContext = await this.contextAnalyzer.analyzeContext(context.project_path);
+      if (this.contextAnalyzer && this.contextAnalyzer.analyzeProjectContext) {
+        projectContext = await this.contextAnalyzer.analyzeProjectContext(context.project_path);
       }
     } catch (error) {
       projectContext = {};

@@ -2,8 +2,8 @@
  * 세션과 메모리 간의 링크를 관리하는 클래스
  */
 
-import { DatabaseConnection } from '../types/database.js';
-import { SessionStatus, Session } from '../types/session.js';
+import { DatabaseConnection } from '../database/connection.js';
+import { SessionStatus } from '../types/session.js';
 
 export class SessionMemoryLinker {
   private connection: DatabaseConnection;
@@ -40,7 +40,7 @@ export class SessionMemoryLinker {
       }
 
       // 메모리에 세션 ID 설정
-      await this.connection.query(
+      await this.connection.run(
         'UPDATE work_memories SET session_id = ?, updated_at = ? WHERE id = ?',
         [sessionId, new Date().toISOString(), memoryId]
       );
