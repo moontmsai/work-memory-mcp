@@ -32,6 +32,7 @@ export * from './get-work-memory-versions.js';
 
 // 세션 컨텍스트 관리 도구들
 export * from './session-context-tools.js';
+export * from './continue-work-session.js';
 import { 
   setActiveSessionTool,
   handleSetActiveSession,
@@ -44,6 +45,10 @@ import {
   clearActiveSessionTool,
   handleClearActiveSession
 } from './session-context-tools.js';
+import {
+  continueWorkSessionTool,
+  handleContinueWorkSession
+} from './continue-work-session.js';
 
 export const allTools = {
   // ... (기존 도구 매핑)
@@ -56,6 +61,7 @@ export const allTools = {
   [getSessionContextTool.name]: getSessionContextTool,
   [setAutoLinkTool.name]: setAutoLinkTool,
   [clearActiveSessionTool.name]: clearActiveSessionTool,
+  [continueWorkSessionTool.name]: continueWorkSessionTool,
 };
 
 export const allToolHandlers = {
@@ -69,4 +75,5 @@ export const allToolHandlers = {
   [getSessionContextTool.name]: handleGetSessionContext,
   [setAutoLinkTool.name]: handleSetAutoLink,
   [clearActiveSessionTool.name]: handleClearActiveSession,
+  [continueWorkSessionTool.name]: handleContinueWorkSession,
 };

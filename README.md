@@ -1,12 +1,32 @@
 # 🧠 Work Memory MCP Server
+AI를 통해 개발
 
-> **🚀 v1.0.0**: 완전한 서머리 시스템 구현으로 토큰 사용량 80% 절약!
+> **🚀 v1.0.0**: 완전한 서머리 시스템 구현으로 토큰 사용량 80% 절약!  
+> **🌐 SSE 지원**: 로컬 MCP + 실험적 SSE 웹서버!
 
 [![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?style=flat&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-43853D?style=flat&logo=node.js&logoColor=white)](https://nodejs.org/)
 [![MCP](https://img.shields.io/badge/MCP-Compatible-blue)](https://modelcontextprotocol.io/)
+[![SSE](https://img.shields.io/badge/SSE-Experimental-orange)](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events)
 
 AI 도구 간 전환 시 업무 컨텍스트를 유지하는 **지능형 메모리 관리 시스템**입니다.
+
+## 📋 목차
+
+- [✨ v1.0.0 주요 혁신](#-v100-주요-혁신)
+- [🎯 핵심 목적](#-핵심-목적)
+- [🚀 빠른 시작](#-빠른-시작)
+- [⚙️ 설정 방법](#️-설정-방법)
+  - [🏠 로컬 MCP 서버 설정](#-로컬-mcp-서버-설정)
+  - [🌐 SSE 웹서버 (실험적)](#-sse-웹서버-실험적)
+- [📚 도구 가이드 (16개)](#-도구-가이드-16개)
+- [🎨 사용 패턴](#-사용-패턴)
+- [💡 효율적인 사용 팁](#-효율적인-사용-팁)
+- [🛠️ 고급 기능](#️-고급-기능)
+- [📊 성능 벤치마크](#-성능-벤치마크)
+- [🏗️ 아키텍처](#️-아키텍처)
+- [🔧 문제 해결](#-문제-해결)
+- [🚧 향후 계획](#-향후-계획)
 
 ## ✨ v1.0.0 주요 혁신
 
@@ -28,7 +48,7 @@ AI 도구 간 전환 시 업무 컨텍스트를 유지하는 **지능형 메모�
 
 ## 🎯 핵심 목적
 
-Claude와 Cursor AI 간 전환 시 업무 연속성을 보장하는 초경량 메모리 시스템
+Claude와 Cursor AI 간 전환 시 업무 연속성을 보장하는 경량 메모리 시스템
 
 ```
 문제: Claude에서 "React 프로젝트 설계 중" → Cursor로 전환 → "뭘 하고 있었지?" 😵
@@ -46,34 +66,132 @@ npm install
 npm run build
 ```
 
-### MCP 설정
+## ⚙️ 설정 방법
 
-**Claude Desktop:**
+### 🏠 로컬 MCP 서버 설정
+
+각 AI 도구에서 Work Memory MCP Server를 설정하는 방법입니다.
+
+#### Claude Desktop 설정
+
+**로컬 MCP 서버 연결:**
 ```json
 {
   "mcpServers": {
     "work-memory": {
       "command": "node",
-      "args": ["/path/to/work-memory-mcp/dist/index.js"],
+      "args": ["/path/dist/index.js"],
       "env": {
-        "WORK_MEMORY_DIR": "/path/to/work_memory"
+        "WORK_MEMORY_DIR": "/path/work_memory"
       }
     }
   }
 }
 ```
 
-**Cursor AI:**
+**원격 SSE 서버 연결:**
+```json
+{
+  "mcpServers": {
+    "work-memory-sse": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-fetch"],
+      "env": {
+        "FETCH_BASE_URL": "http://localhost:3001"
+      }
+    }
+  }
+}
+```
+
+#### Cursor AI 설정
+
 ```json
 {
   "mcpServers": {
     "work-memory": {
       "command": "node",
       "args": ["./dist/index.js"],
-      "cwd": "/path/to/work-memory-mcp"
+      "cwd": "/path"
     }
   }
 }
+```
+
+### 🌐 SSE 웹서버 (실험적)
+
+**모든 MCP 도구를 HTTP/SSE를 통해 사용**할 수 있는 실험적 웹서버가 포함되어 있습니다.
+
+#### SSE 서버 시작
+
+```bash
+# SSE 서버 실행 (포트 3001)
+npm run sse-server
+
+# 또는 직접 실행
+node bin/start-sse-server.js
+```
+
+#### 웹에서 MCP 도구 사용
+
+```javascript
+// SSE 연결 설정
+const eventSource = new EventSource('http://localhost:3001/sse');
+
+// MCP 도구 호출 (예: 메모리 검색)
+fetch('http://localhost:3001/api/mcp', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    jsonrpc: '2.0',
+    id: '1',
+    method: 'tools/call',
+    params: {
+      name: 'search_work_memory',
+      arguments: { query: 'React 프로젝트' }
+    }
+  })
+});
+
+// 결과 수신
+eventSource.onmessage = function(event) {
+  const response = JSON.parse(event.data);
+  console.log('MCP Response:', response);
+};
+```
+
+#### 지원 기능
+
+- **모든 MCP 도구**: 16개 도구 모두 HTTP API로 접근 가능
+- **JSON-RPC 2.0**: 표준 MCP 프로토콜 완벽 지원
+- **실시간 스트리밍**: SSE로 즉시 응답 수신
+- **메시지 큐**: 안정적인 메시지 전달 보장
+- **브로드캐스트**: 여러 클라이언트 동시 지원
+
+> **⚠️ 주의**: 실험적 기능으로 인증 시스템이 없습니다. 외부 접근이 필요한 경우 Nginx 등 역방향 프록시 사용을 권장합니다.
+
+### 🔧 설정 파일 위치
+
+| 플랫폼 | Claude Desktop 설정 파일 경로 |
+|--------|------------------------------|
+| **Windows** | `%APPDATA%\Claude\claude_desktop_config.json` |
+| **macOS** | `~/Library/Application Support/Claude/claude_desktop_config.json` |
+| **Linux** | `~/.config/Claude/claude_desktop_config.json` |
+
+### 📊 설정 검증
+
+설정이 올바르게 되었는지 확인하는 방법:
+
+```bash
+# 로컬 MCP 서버 테스트
+node dist/index.js
+
+# SSE 서버 테스트
+npm run sse-server
+curl http://localhost:3001/sse
+
+# MCP 도구 목록 확인
+npx @modelcontextprotocol/inspector node dist/index.js
 ```
 
 ## 📚 도구 가이드 (16개)
@@ -370,6 +488,7 @@ tags: ["React", "Node.js", "API", "데이터베이스"]
 │   ├── 🛠️ tools/              # 16개 MCP 도구
 │   ├── 🧮 utils/              # 서머리 생성기 등
 │   ├── 🗄️ database/           # SQLite 연결 관리
+│   ├── 🌐 sse/                # SSE 웹서버 (실험적)
 │   └── 📝 types/              # TypeScript 정의
 ├── 💾 work_memory/            # 데이터 저장소
 │   └── database.sqlite        # SQLite 데이터베이스
@@ -390,6 +509,28 @@ npm run build
 node dist/index.js
 ```
 
+### 로컬 MCP 연결 문제
+
+1. **경로 확인**
+   ```json
+   // Windows 절대 경로 사용 권장
+   "args": ["D:/project/memory/dist/index.js"]
+   ```
+
+2. **환경 변수 설정**
+   ```json
+   "env": {
+     "WORK_MEMORY_DIR": "D:/project/memory/work_memory",
+     "NODE_ENV": "production"
+   }
+   ```
+
+3. **권한 확인**
+   ```bash
+   # 실행 권한 확인 (Linux/macOS)
+   chmod +x dist/index.js
+   ```
+
 ### 검색 결과 없음
 ```bash
 # 인덱스 최적화 실행
@@ -397,6 +538,60 @@ optimize_search_index()
 
 # 서버 상태 확인
 get_server_status()
+
+# 데이터베이스 파일 확인
+ls -la work_memory/database.sqlite
+```
+
+### 성능 문제
+
+1. **메모리 사용량 높음**
+   ```bash
+   # 데이터베이스 최적화
+   optimize_database()
+   
+   # 오래된 기록 정리
+   delete_work_memory({ older_than_days: 90, confirm: true })
+   ```
+
+2. **검색 속도 느림**
+   ```bash
+   # 인덱스 재구성
+   optimize_search_index({ force_rebuild: true })
+   ```
+
+### 환경별 설정 가이드
+
+#### 개발 환경
+```json
+{
+  "mcpServers": {
+    "work-memory": {
+      "command": "node",
+      "args": ["D:/project/memory/dist/index.js"],
+      "env": {
+        "NODE_ENV": "development",
+        "DEBUG": "work-memory:*"
+      }
+    }
+  }
+}
+```
+
+#### 프로덕션 환경
+```json
+{
+  "mcpServers": {
+    "work-memory": {
+      "command": "node",
+      "args": ["/app/dist/index.js"],
+      "env": {
+        "NODE_ENV": "production",
+        "WORK_MEMORY_DIR": "/data/work_memory"
+      }
+    }
+  }
+}
 ```
 
 ## 📄 라이센스

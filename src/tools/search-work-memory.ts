@@ -31,6 +31,9 @@ export interface SearchWorkMemoryArgs {
   // 진행률 추적 옵션
   enable_progress?: boolean; // 진행률 추적 활성화 (기본값: false)
   progress_task_id?: string; // 진행률 추적용 작업 ID (자동 생성 가능)
+  // 세션 정보 연동 옵션
+  include_session_info?: boolean; // 세션 정보 포함 여부 (기본값: false)
+  session_id?: string; // 특정 세션의 메모리만 검색
 }
 
 export const searchWorkMemoryTool: Tool = {
@@ -136,6 +139,17 @@ export const searchWorkMemoryTool: Tool = {
         type: 'string',
         description: '진행률 추적용 작업 ID (자동 생성 가능)',
         minLength: 1
+      },
+      // 세션 정보 연동 옵션
+      include_session_info: {
+        type: 'boolean',
+        description: '세션 정보 포함 여부 (기본값: false)',
+        default: false
+      },
+      session_id: {
+        type: 'string',
+        description: '특정 세션의 메모리만 검색',
+        minLength: 1
       }
     },
     required: ['query']
@@ -186,6 +200,7 @@ export async function handleSearchWorkMemory(args: SearchWorkMemoryArgs): Promis
 
     const limit = args.limit || 20;
     const includeArchived = args.include_archived || false;
+    const includeSessionInfo = args.include_session_info || false;
 
     // WHERE 조건 구성
     const whereConditions: string[] = [];
@@ -219,6 +234,30 @@ export async function handleSearchWorkMemory(args: SearchWorkMemoryArgs): Promis
       for (const tag of args.tags) {
         whereConditions.push('tags LIKE ?');
         params.push(`%"${tag}"%`);
+      }
+    }
+
+    // 세션 필터 (특정 세션의 메모리만 검색)
+    if (args.session_id) {
+      // work_memories 테이블에 session_id 컴럼이 있는지 다시 확인
+      try {
+        const hasSessionColumn = await connection.get(
+          "SELECT name FROM pragma_table_info('work_memories') WHERE name = 'session_id'"
+        );
+        
+        if (hasSessionColumn) {
+          // work_memories 테이블에 session_id 컴럼이 있는 경우
+          whereConditions.push('session_id = ?');
+          params.push(args.session_id);
+        } else {
+          // change_history 테이블을 통해 세션 연결 찾기
+          whereConditions.push('id IN (SELECT DISTINCT memory_id FROM change_history WHERE session_id = ?)');
+          params.push(args.session_id);
+        }
+      } catch (error) {
+        // 오류 발생 시 change_history 방식으로 폴백
+        whereConditions.push('id IN (SELECT DISTINCT memory_id FROM change_history WHERE session_id = ?)');
+        params.push(args.session_id);
       }
     }
 
@@ -339,18 +378,49 @@ export async function handleSearchWorkMemory(args: SearchWorkMemoryArgs): Promis
       ? 'content, extracted_content'  // 상세시: 전체 + 서머리
       : 'extracted_content';          // 기본: 서머리만 (토큰 절약)
 
-    // 검색 실행 - 최적화된 쿼리
-    const searchQuery = `
-      SELECT 
-        id, ${contentFields}, project, tags, importance_score, created_by,
-        created_at, updated_at, access_count, last_accessed_at,
-        context, requirements, result_content, work_type, worked,
-        ((100 * ${1 - importanceWeight}) + (importance_score * ${importanceWeight})) as combined_score
-      FROM work_memories 
-      ${whereClause}
-      ${orderClause}
-      LIMIT ?
-    `;
+    // 세션 정보 포함 여부에 따른 쿼리 구성
+    let searchQuery: string;
+    if (includeSessionInfo) {
+      // 세션 정보를 포함한 검색 쿼리
+      searchQuery = `
+        SELECT DISTINCT
+          wm.id, wm.${contentFields}, wm.project, wm.tags, wm.importance_score, wm.created_by,
+          wm.created_at, wm.updated_at, wm.access_count, wm.last_accessed_at,
+          wm.context, wm.requirements, wm.result_content, wm.work_type, wm.worked,
+          ws.session_id, ws.project_name as session_project_name, ws.project_path,
+          ws.status as session_status, ws.description as session_description,
+          ((100 * ${1 - importanceWeight}) + (wm.importance_score * ${importanceWeight})) as combined_score
+        FROM work_memories wm
+        LEFT JOIN (
+          SELECT DISTINCT 
+            ch.memory_id,
+            ws.session_id,
+            ws.project_name,
+            ws.project_path,
+            ws.status,
+            ws.description
+          FROM change_history ch
+          INNER JOIN work_sessions ws ON ch.session_id = ws.session_id
+          WHERE ch.session_id IS NOT NULL
+        ) ws ON wm.id = ws.memory_id
+        ${whereClause}
+        ${orderClause}
+        LIMIT ?
+      `;
+    } else {
+      // 기본 검색 쿼리 (세션 정보 제외)
+      searchQuery = `
+        SELECT 
+          id, ${contentFields}, project, tags, importance_score, created_by,
+          created_at, updated_at, access_count, last_accessed_at,
+          context, requirements, result_content, work_type, worked,
+          ((100 * ${1 - importanceWeight}) + (importance_score * ${importanceWeight})) as combined_score
+        FROM work_memories 
+        ${whereClause}
+        ${orderClause}
+        LIMIT ?
+      `;
+    }
 
     const results = await connection.all(searchQuery, [...params, limit]);
     
@@ -473,7 +543,30 @@ export async function handleSearchWorkMemory(args: SearchWorkMemoryArgs): Promis
       output += `   👤 작성자: ${memory.created_by}\n`;
       output += `   ⭐ 중요도: ${importance.level} (${memory.importance_score}점)\n`;
       output += `   📅 생성: ${formatHumanReadableDate(memory.created_at)}\n`;
-      output += `   👁️ 접근: ${memory.access_count}회\n\n`;
+      output += `   👁️ 접근: ${memory.access_count}회\n`;
+      
+      // 세션 정보 표시 (포함된 경우)
+      if (includeSessionInfo) {
+        if (memory.session_id) {
+          const sessionStatusEmoji = {
+            'active': '🟢',
+            'paused': '🟡',
+            'completed': '✅',
+            'cancelled': '❌'
+          };
+          
+          const statusEmoji = sessionStatusEmoji[memory.session_status] || '⚪';
+          output += `   🔗 세션: ${statusEmoji} ${memory.session_project_name || memory.session_id.substring(0, 12)}...\n`;
+          
+          if (memory.project_path) {
+            output += `   📂 경로: ${memory.project_path}\n`;
+          }
+        } else {
+          output += `   🔗 세션: 연결되지 않음\n`;
+        }
+      }
+      
+      output += '\n';
     });
 
     // 검색 통계
