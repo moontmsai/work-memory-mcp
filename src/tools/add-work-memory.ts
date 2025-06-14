@@ -247,7 +247,13 @@ export async function handleAddWorkMemory(args: AddWorkMemoryArgs): Promise<stri
     }
 
     // 7. 세션 자동 연동 (세션 시스템이 활성화된 경우)
-    let sessionLinkResult: { success: boolean; session_id?: string; created_session?: boolean } = { success: false };
+    let sessionLinkResult: { 
+      success: boolean; 
+      session_id?: string; 
+      created_session?: boolean;
+      session_name?: string;
+      reused_session?: boolean;
+    } = { success: false };
     try {
       const { getSessionContext } = await import('../session/SessionContextManager.js');
       const { SessionMemoryLinker } = await import('../session/SessionMemoryLinker.js');
@@ -267,12 +273,19 @@ export async function handleAddWorkMemory(args: AddWorkMemoryArgs): Promise<stri
           });
           sessionLinkResult.session_id = currentSessionId;
         } else {
-          // 활성 세션에 자동 링크 (필요시 세션 생성)
-          sessionLinkResult = await memoryLinker.autoLinkToActiveSession(memoryId, {
-            create_session_if_none: true,
-            project_name: project || 'Uncategorized Memories',
-            project_path: process.cwd() // 현재 작업 디렉토리
+          // 🚀 스마트 세션 자동 생성 및 링크 (내용 분석 기반)
+          const smartResult = await memoryLinker.smartAutoLinkToSession(memoryId, content, {
+            project_name: project || undefined,
+            project_path: process.cwd()
           });
+          
+          sessionLinkResult = {
+            success: smartResult.success,
+            session_id: smartResult.session_id,
+            created_session: smartResult.created_session,
+            session_name: smartResult.session_name,
+            reused_session: smartResult.reused_session
+          };
         }
       }
     } catch (sessionError) {
@@ -303,8 +316,12 @@ export async function handleAddWorkMemory(args: AddWorkMemoryArgs): Promise<stri
     
     // 세션 연동 결과 추가
     if (sessionLinkResult.success && sessionLinkResult.session_id) {
-      const sessionIcon = sessionLinkResult.created_session ? '🆕' : '🔗';
-      result += `\n${sessionIcon} 세션 연동: ${sessionLinkResult.session_id.substring(0, 20)}...${sessionLinkResult.created_session ? ' (새 세션 생성됨)' : ''}`;
+      const sessionIcon = sessionLinkResult.created_session ? '🆕' : 
+                          sessionLinkResult.reused_session ? '♾️' : '🔗';
+      const sessionStatus = sessionLinkResult.created_session ? ' (새 세션 생성됨)' : 
+                            sessionLinkResult.reused_session ? ' (기존 세션 재사용)' : '';
+      const sessionName = sessionLinkResult.session_name ? ` [${sessionLinkResult.session_name}]` : '';
+      result += `\n${sessionIcon} 세션 연동: ${sessionLinkResult.session_id.substring(0, 25)}...${sessionName}${sessionStatus}`;
     }
     
     if (context) {
