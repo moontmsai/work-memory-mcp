@@ -2,6 +2,27 @@
  * 유틸리티 헬퍼 함수들
  */
 
+// 상수들을 모듈 레벨에서 정의 (메모리 효율성)
+const MIN_WORD_LENGTH = 2;
+const MAX_KEYWORDS_DEFAULT = 10;
+const WORD_SPLIT_REGEX = /[^\w\sㄱ-ㅎㅏ-ㅣ가-힣]/g;
+
+// 불용어 Set을 모듈 레벨에서 한 번만 생성 (성능 최적화)
+const STOP_WORDS = new Set([
+  // 영어 불용어
+  'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by',
+  'from', 'as', 'is', 'was', 'are', 'were', 'be', 'been', 'being', 'have', 'has', 'had',
+  'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'must',
+  'can', 'this', 'that', 'these', 'those', 'i', 'you', 'he', 'she', 'it', 'we', 'they',
+  'me', 'him', 'her', 'us', 'them', 'my', 'your', 'his', 'her', 'its', 'our', 'their',
+  
+  // 한국어 불용어
+  '그', '이', '저', '것', '들', '와', '과', '를', '을', '가', '이', '에', '의', '로', '으로',
+  '에서', '부터', '까지', '보다', '처럼', '같이', '함께', '하고', '하지만', '그러나', '그리고',
+  '또는', '또한', '그래서', '따라서', '그런데', '하지만', '만약', '만일', '수', '때', '동안',
+  '중', '안', '밖', '위', '아래', '앞', '뒤', '좌', '우', '다른', '같은', '새로운'
+]);
+
 /**
  * 고유한 메모리 ID 생성
  */
@@ -14,20 +35,19 @@ export function generateMemoryId(): string {
 /**
  * 텍스트에서 키워드 추출
  */
-export function extractKeywords(text: string, maxKeywords: number = 10): string[] {
-  // 한글, 영문, 숫자를 포함한 단어들 추출
-  const words = text
-    .toLowerCase()
-    .replace(/[^\w\sㄱ-ㅎㅏ-ㅣ가-힣]/g, ' ')
-    .split(/\s+/)
-    .filter(word => word.length >= 2)
-    .filter(word => !isStopWord(word));
-
-  // 중복 제거 및 빈도순 정렬
+export function extractKeywords(text: string, maxKeywords: number = MAX_KEYWORDS_DEFAULT): string[] {
   const wordFreq = new Map<string, number>();
-  words.forEach(word => {
-    wordFreq.set(word, (wordFreq.get(word) || 0) + 1);
-  });
+  
+  text
+    .toLowerCase()
+    .replace(WORD_SPLIT_REGEX, ' ')
+    .split(/\s+/)
+    .forEach(word => {
+      // 길이 체크와 불용어 체크를 한 번에 처리 (성능 최적화)
+      if (word.length >= MIN_WORD_LENGTH && !isStopWord(word)) {
+        wordFreq.set(word, (wordFreq.get(word) || 0) + 1);
+      }
+    });
 
   return Array.from(wordFreq.entries())
     .sort((a, b) => b[1] - a[1])
@@ -39,22 +59,7 @@ export function extractKeywords(text: string, maxKeywords: number = 10): string[
  * 불용어 체크 (한국어 + 영어)
  */
 function isStopWord(word: string): boolean {
-  const stopWords = new Set([
-    // 영어 불용어
-    'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by',
-    'from', 'as', 'is', 'was', 'are', 'were', 'be', 'been', 'being', 'have', 'has', 'had',
-    'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'must',
-    'can', 'this', 'that', 'these', 'those', 'i', 'you', 'he', 'she', 'it', 'we', 'they',
-    'me', 'him', 'her', 'us', 'them', 'my', 'your', 'his', 'her', 'its', 'our', 'their',
-    
-    // 한국어 불용어
-    '그', '이', '저', '것', '들', '와', '과', '를', '을', '가', '이', '에', '의', '로', '으로',
-    '에서', '부터', '까지', '보다', '처럼', '같이', '함께', '하고', '하지만', '그러나', '그리고',
-    '또는', '또한', '그래서', '따라서', '그런데', '하지만', '만약', '만일', '수', '때', '동안',
-    '중', '안', '밖', '위', '아래', '앞', '뒤', '좌', '우', '다른', '같은', '새로운'
-  ]);
-  
-  return stopWords.has(word);
+  return STOP_WORDS.has(word);
 }
 
 /**
