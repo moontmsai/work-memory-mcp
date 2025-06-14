@@ -9,7 +9,7 @@ import { SessionQueryManager } from '../session/SessionQueryManager.js';
 import { getSessionContext } from '../session/SessionContextManager.js';
 import { formatHumanReadableDate, getWorkedEmoji, getWorkedDisplayText } from '../utils/index.js';
 import { deserializeTags } from '../utils/helpers.js';
-import { SessionStatus } from '../types/session.js';
+import { SessionStatus, WorkSession, SessionWithMemories } from '../types/session.js';
 
 export interface ContinueWorkSessionArgs {
   project_name?: string;
@@ -78,7 +78,7 @@ export async function handleContinueWorkSession(args: ContinueWorkSessionArgs): 
     const sessionQueryManager = new SessionQueryManager(connection);
     const sessionContext = getSessionContext(connection);
 
-    let targetSession = null;
+    let targetSession: WorkSession | SessionWithMemories | null = null;
     let searchMethod = '';
 
     // 1. 세션 검색
@@ -91,7 +91,7 @@ export async function handleContinueWorkSession(args: ContinueWorkSessionArgs): 
       const result = await sessionQueryManager.getSessionsByProject(args.project_name, {
         status: [SessionStatus.ACTIVE, SessionStatus.PAUSED],
         sort_by: 'last_activity_at',
-        sort_order: 'desc',
+        sort_order: 'DESC',
         limit: 1
       });
       
@@ -106,7 +106,7 @@ export async function handleContinueWorkSession(args: ContinueWorkSessionArgs): 
         search_fields: ['project_name', 'description'],
         status: [SessionStatus.ACTIVE, SessionStatus.PAUSED, SessionStatus.COMPLETED],
         sort_by: 'last_activity_at',
-        sort_order: 'desc',
+        sort_order: 'DESC',
         limit: 5,
         include_memories: true
       });
@@ -175,11 +175,12 @@ export async function handleContinueWorkSession(args: ContinueWorkSessionArgs): 
     }
 
     // 4. 관련 작업기억들 조회 및 표시
+    let sessionMemories: any[] = [];
     if (args.include_memories !== false) {
       const memoryLimit = args.memory_limit || 10;
       
       // change_history에서 해당 세션의 메모리들 찾기 (session_id 컬럼 활용)
-      const sessionMemories = await connection.all(`
+      sessionMemories = await connection.all(`
         SELECT DISTINCT wm.* 
         FROM work_memories wm
         INNER JOIN change_history ch ON wm.id = ch.memory_id
