@@ -50,8 +50,7 @@
 {
   "operation": "delete",
   "max_importance_score": 30,
-  "archive_only": true,
-  "confirm": true
+  "archive_only": true
 }
 ```
 
@@ -114,7 +113,6 @@
 - `compare_versions`: 버전간 비교
 - `get_changes`: 변경 이력 조회
 - `cleanup_versions`: 오래된 버전 정리
-- `backup`: 수동 백업 생성
 
 **사용 예시:**
 ```json
@@ -133,27 +131,55 @@
 - `monitor`: 연결 상태 모니터링  
 - `optimize`: 데이터베이스 최적화
 - `batch`: 일괄 작업 처리
-- `delete`: 시스템 일괄 삭제 (강화된 삭제 기능)
+- `delete`: 카테고리별 세분화된 삭제 기능
+- `analyze`: 상세 인덱스 분석
+- `diagnose`: 인덱스 진단 및 복구
+- `repair`: 누락된 인덱스 복구
 
-**사용 예시:**
+**카테고리별 삭제 예시:**
 ```json
+// 작업기억 조건부 삭제
 {
   "operation": "delete",
+  "category": "work_memories",
   "delete_criteria": {
     "combined_criteria": {
       "project": "old_project",
       "importance_range": { "max": 25 },
       "work_type": "todo",
       "worked": "완료",
-      "older_than_days": 30
+      "older_than_days": 30,
+      "exclude_ids": ["important_task_1"]
     }
   },
-  "archive_only": true,
+  "archive_only": true
+}
+
+// 세션 데이터 정리
+{
+  "operation": "delete",
+  "category": "sessions",
+  "sessions_older_than_days": 30
+}
+
+// 검색 인덱스 재구성
+{
+  "operation": "delete",
+  "category": "search_index",
+  "rebuild_search_index": true,
   "confirm": true
 }
 ```
 
-## 🚀 강화된 일괄 삭제 기능
+## 🚀 카테고리별 세분화된 삭제 시스템
+
+### 삭제 카테고리
+- **work_memories**: 작업기억 삭제 (조건부/전체)
+- **sessions**: 세션 데이터 삭제 (특정/기간별)
+- **history**: 변경 히스토리 삭제 (액션별/기간별)
+- **search_index**: 검색 인덱스 재구성/정리
+- **project_index**: 프로젝트 인덱스 정리
+- **all_data**: 전체 데이터 삭제
 
 ### 지원하는 삭제 조건
 - **단일/복수 ID**: 특정 메모리 지정 삭제
@@ -163,13 +189,14 @@
 - **작업 유형**: memory/todo 유형별 삭제
 - **완료 상태**: 완료/미완료 상태별 삭제
 - **날짜 기준**: 지정 일수보다 오래된 것
+- **제외 조건**: 특정 ID/생성자 보호
+- **화이트리스트**: 특정 생성자만 유지
 - **복합 조건**: 여러 조건 동시 적용
 
 ### 안전 장치
-- **1000개 이상**: 확인 필수 (`confirm=true`)
-- **5000개 이상**: 완전 차단 (배치 분할 요구)
 - **아카이브 모드**: 안전한 소프트 삭제 지원
 - **트랜잭션 보호**: 실패시 자동 롤백
+- **즉시 피드백**: 삭제 결과 즉시 표시
 
 ## 설치 및 설정
 
@@ -272,8 +299,7 @@ Claude Desktop의 설정 파일에 다음을 추가하세요:
   "delete_criteria": {
     "max_importance_score": 30
   },
-  "archive_only": true,
-  "confirm": true
+  "archive_only": true
 }
 
 // 완료된 할일 정리
@@ -287,17 +313,26 @@ Claude Desktop의 설정 파일에 다음을 추가하세요:
   "archive_only": false
 }
 
-// 복합 조건 고급 정리
+// 복합 조건 고급 정리 (특정 생성자 제외)
 {
   "operation": "delete",
   "delete_criteria": {
     "combined_criteria": {
       "project": "legacy_project",
       "importance_range": { "max": 25 },
-      "older_than_days": 60
+      "older_than_days": 60,
+      "exclude_ids": ["critical_memory_1"],
+      "creators_whitelist": ["admin"]
     }
-  },
-  "archive_only": true
+  }
+}
+
+// 히스토리 정리
+{
+  "operation": "delete",
+  "category": "history",
+  "history_older_than_days": 90,
+  "history_actions": ["created", "updated"]
 }
 ```
 
@@ -305,7 +340,7 @@ Claude Desktop의 설정 파일에 다음을 추가하세요:
 
 - **SQLite** 기반 로컬 데이터베이스
 - **better-sqlite3** 사용으로 고성능 보장
-- 자동 백업 및 복구 시스템
+- 자동 복구 시스템
 - 버전 관리 및 이력 추적
 - 세션 관리 테이블 지원
 
@@ -360,8 +395,9 @@ src/
 
 ### v0.1.1 주요 업데이트
 - **5개 통합 도구**: 18개 도구를 5개로 통합하여 사용성 극대화
-- **강화된 일괄 삭제**: 세션, 중요도 점수, 복합 조건 기반 삭제
-- **안전성 강화**: 대량 작업 보호, 트랜잭션 안전성, 롤백 지원
+- **카테고리별 세분화된 삭제**: 작업기억, 세션, 히스토리, 인덱스별 정교한 삭제
+- **고급 조건부 삭제**: 제외 조건, 화이트리스트, 복합 조건 지원
+- **안전성 강화**: DRY RUN, 대량 작업 보호, 트랜잭션 안전성, 롤백 지원
 - **메모리 최적화**: LRU 캐시, 진행률 추적 메모리 관리
 - **한글 지원 완성**: 안전한 JSON 처리, UTF-8 인코딩 보장
 - **MCP 프로토콜 준수**: stdout 보호, JSON-RPC 호환성
@@ -385,12 +421,11 @@ npm run build && npm start
 
 ### 대용량 작업 실패
 ```json
-// 배치 크기 줄이기
+// 안전한 아카이브 모드 사용
 {
   "operation": "delete",
   "delete_criteria": { "project": "large_project" },
-  "confirm": true,
-  "archive_only": true  // 안전한 아카이브 모드 사용
+  "archive_only": true
 }
 ```
 

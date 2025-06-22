@@ -4,7 +4,6 @@ import { SearchManager } from '../utils/search-manager.js';
 
 export interface IndexRepairArgs {
   repair_missing?: boolean;
-  dry_run?: boolean;
   force_rebuild?: boolean;
 }
 
@@ -18,11 +17,6 @@ export const indexRepairTool: Tool = {
         type: 'boolean',
         description: '누락된 인덱스를 실제로 복구',
         default: true
-      },
-      dry_run: {
-        type: 'boolean',
-        description: '실제 수정 없이 시뮬레이션만 수행',
-        default: false
       },
       force_rebuild: {
         type: 'boolean',
@@ -61,7 +55,6 @@ export async function handleIndexRepair(args: IndexRepairArgs): Promise<string> 
     if (args.force_rebuild) {
       result += '🔄 **전체 인덱스 재구성 시작...**\n';
       
-      if (!args.dry_run) {
         const searchManager = new SearchManager();
         
         try {
@@ -78,9 +71,6 @@ export async function handleIndexRepair(args: IndexRepairArgs): Promise<string> 
         } catch (rebuildError) {
           result += `❌ 전체 재구성 실패: ${rebuildError instanceof Error ? rebuildError.message : String(rebuildError)}\n`;
         }
-      } else {
-        result += '📋 DRY RUN: 전체 재구성이 수행될 예정\n';
-      }
       
       return result;
     }
@@ -109,7 +99,7 @@ export async function handleIndexRepair(args: IndexRepairArgs): Promise<string> 
 
     result += `❌ **누락된 메모리 발견: ${missingMemories.length}개**\n\n`;
 
-    if (args.repair_missing && !args.dry_run) {
+    if (args.repair_missing) {
       result += '🔧 **인덱스 복구 시작...**\n';
       
       const searchManager = new SearchManager();
@@ -179,13 +169,6 @@ export async function handleIndexRepair(args: IndexRepairArgs): Promise<string> 
       result += `- 인덱싱된 메모리: ${finalIndexed.count}개\n`;
       result += `- 최종 커버리지: ${finalCoverage}%\n`;
 
-    } else if (args.repair_missing && args.dry_run) {
-      result += '📋 **DRY RUN - 복구 시뮬레이션:**\n';
-      missingMemories.forEach((memory, index) => {
-        const preview = memory.content.substring(0, 50) + (memory.content.length > 50 ? '...' : '');
-        result += `${index + 1}. ID: ${memory.id} - "${preview}"\n`;
-      });
-      result += `\n📋 ${missingMemories.length}개 메모리가 복구될 예정입니다.\n`;
     } else {
       result += '⚠️ repair_missing=true로 설정하여 복구를 수행하세요.\n';
     }

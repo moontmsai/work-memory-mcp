@@ -85,8 +85,28 @@ const SystemOperationSchema = z.object({
     }).optional()
   }).optional(),
   archive_only: z.boolean().optional(),
-  confirm: z.boolean().optional(),
   delete_all: z.boolean().optional(),
+  
+  // 카테고리별 삭제 옵션
+  category: z.enum(['work_memories', 'sessions', 'history', 'search_index', 'project_index', 'all_data']).optional(),
+  
+  // 세션 삭제 옵션
+  delete_sessions: z.boolean().optional(),
+  sessions_older_than_days: z.number().optional(),
+  
+  // 히스토리 삭제 옵션
+  delete_history: z.boolean().optional(),
+  history_older_than_days: z.number().optional(),
+  history_actions: z.array(z.string()).optional(),
+  clean_orphaned_history: z.boolean().optional(),
+  history_memory_ids: z.array(z.string()).optional(),
+  
+  // 검색 인덱스 삭제 옵션
+  rebuild_search_index: z.boolean().optional(),
+  clean_orphaned_keywords: z.boolean().optional(),
+  
+  // 프로젝트 인덱스 삭제 옵션
+  clean_project_index: z.boolean().optional(),
   
   // diagnose 작업용 필드
   fix_issues: z.boolean().optional(),
@@ -100,7 +120,6 @@ const SystemOperationSchema = z.object({
   
   // repair 작업용 필드
   repair_missing: z.boolean().optional(),
-  dry_run: z.boolean().optional(),
   force_rebuild: z.boolean().optional()
 });
 
@@ -118,17 +137,22 @@ export const systemTool = {
 5. 일괄삭제: { "operation": "delete", "delete_criteria": {...}, "archive_only": true }
 6. 인덱스진단: { "operation": "diagnose", "fix_issues": true, "rebuild_index": false }
 7. 상세분석: { "operation": "analyze", "show_missing": true, "analyze_patterns": true }
-8. 인덱스복구: { "operation": "repair", "repair_missing": true, "dry_run": false }
+8. 인덱스복구: { "operation": "repair", "repair_missing": true, "force_rebuild": false }
 
 각 작업별 상세 옵션:
 - status: include_logs
 - monitor: include_performance, include_stats
 - optimize: vacuum_type(full/incremental), analyze
 - batch: operations(필수), atomic, enable_progress
-- delete: delete_criteria(필수), archive_only, confirm
+- delete: delete_criteria OR category, archive_only (카테고리별 세분화된 삭제 지원)
 - diagnose: fix_issues, rebuild_index, verbose
 - analyze: show_missing, show_indexed, analyze_patterns
-- repair: repair_missing, dry_run, force_rebuild`,
+- repair: repair_missing, force_rebuild
+
+카테고리별 삭제 예시:
+- 고아 히스토리 정리: { "operation": "delete", "category": "history", "clean_orphaned_history": true }
+- 세션 정리: { "operation": "delete", "category": "sessions", "sessions_older_than_days": 30 }
+- 검색 인덱스 재구성: { "operation": "delete", "category": "search_index", "rebuild_search_index": true }`,
   inputSchema: {
     type: 'object',
     properties: {
@@ -259,13 +283,9 @@ export const systemTool = {
         type: 'boolean',
         description: '아카이브 모드 (완전 삭제 대신 아카이브)'
       },
-      confirm: {
-        type: 'boolean',
-        description: '삭제 확인 (대량 삭제시 필수)'
-      },
       delete_all: {
         type: 'boolean',
-        description: '전체 삭제 (confirm=true 필수)'
+        description: '전체 삭제'
       },
       
       // diagnose 작업 필드
@@ -308,14 +328,74 @@ export const systemTool = {
         description: '누락된 인덱스를 실제로 복구 (기본: true)',
         default: true
       },
-      dry_run: {
-        type: 'boolean',
-        description: '실제 수정 없이 시뮬레이션만 수행 (기본: false)',
-        default: false
-      },
       force_rebuild: {
         type: 'boolean',
         description: '모든 인덱스를 강제로 재구성 (기본: false)',
+        default: false
+      },
+      
+      // 카테고리별 삭제 옵션
+      category: {
+        type: 'string',
+        enum: ['work_memories', 'sessions', 'history', 'search_index', 'project_index', 'all_data'],
+        description: '삭제할 데이터 카테고리'
+      },
+      
+      // 세션 삭제 옵션
+      delete_sessions: {
+        type: 'boolean',
+        description: '세션 데이터 자체를 삭제',
+        default: false
+      },
+      sessions_older_than_days: {
+        type: 'number',
+        description: '지정된 일수보다 오래된 세션 삭제',
+        minimum: 1
+      },
+      
+      // 히스토리 삭제 옵션
+      delete_history: {
+        type: 'boolean',
+        description: '변경 히스토리 삭제',
+        default: false
+      },
+      history_older_than_days: {
+        type: 'number',
+        description: '지정된 일수보다 오래된 히스토리 삭제',
+        minimum: 1
+      },
+      history_actions: {
+        type: 'array',
+        items: { type: 'string' },
+        description: '삭제할 특정 히스토리 액션 (예: ["created", "updated"])'
+      },
+      clean_orphaned_history: {
+        type: 'boolean',
+        description: '고아 히스토리 정리 (메모리가 없는 히스토리)',
+        default: false
+      },
+      history_memory_ids: {
+        type: 'array',
+        items: { type: 'string' },
+        description: '특정 메모리 ID의 히스토리만 삭제'
+      },
+      
+      // 검색 인덱스 삭제 옵션
+      rebuild_search_index: {
+        type: 'boolean',
+        description: '검색 인덱스 완전 재구성',
+        default: false
+      },
+      clean_orphaned_keywords: {
+        type: 'boolean',
+        description: '고아된 검색 키워드 정리',
+        default: false
+      },
+      
+      // 프로젝트 인덱스 삭제 옵션
+      clean_project_index: {
+        type: 'boolean',
+        description: '프로젝트 인덱스 정리',
         default: false
       }
     },
@@ -381,26 +461,40 @@ export async function handleSystem(args: SystemOperationArgs): Promise<string> {
     }
     
     case 'delete': {
-      if (!args.delete_criteria) {
-        throw new Error('delete 작업에는 delete_criteria가 필수입니다');
+      // 카테고리별 삭제인 경우 delete_criteria 없이도 허용
+      if (!args.delete_criteria && !args.category) {
+        throw new Error('delete 작업에는 delete_criteria 또는 category가 필요합니다');
       }
       
-      // delete_criteria를 DeleteWorkMemoryArgs 형식으로 안전하게 변환
+      // DeleteWorkMemoryArgs 형식으로 변환 (모든 새로운 필드 포함)
       const deleteArgs: DeleteWorkMemoryArgs = {
-        id: args.delete_criteria.id,
-        ids: args.delete_criteria.ids,
-        project: args.delete_criteria.project,
-        session_id: args.delete_criteria.session_id,
-        min_importance_score: args.delete_criteria.min_importance_score,
-        max_importance_score: args.delete_criteria.max_importance_score,
-        work_type: args.delete_criteria.work_type,
-        worked: args.delete_criteria.worked,
-        created_by: args.delete_criteria.created_by,
-        older_than_days: args.delete_criteria.older_than_days,
-        combined_criteria: args.delete_criteria.combined_criteria,
+        // 기존 delete_criteria 필드들
+        id: args.delete_criteria?.id,
+        ids: args.delete_criteria?.ids,
+        project: args.delete_criteria?.project,
+        session_id: args.delete_criteria?.session_id,
+        min_importance_score: args.delete_criteria?.min_importance_score,
+        max_importance_score: args.delete_criteria?.max_importance_score,
+        work_type: args.delete_criteria?.work_type,
+        worked: args.delete_criteria?.worked,
+        created_by: args.delete_criteria?.created_by,
+        older_than_days: args.delete_criteria?.older_than_days,
+        combined_criteria: args.delete_criteria?.combined_criteria,
         archive_only: args.archive_only,
-        confirm: args.confirm,
-        delete_all: args.delete_all
+        delete_all: args.delete_all,
+        
+        // 새로운 카테고리별 삭제 필드들
+        category: args.category,
+        delete_sessions: args.delete_sessions,
+        sessions_older_than_days: args.sessions_older_than_days,
+        delete_history: args.delete_history,
+        history_older_than_days: args.history_older_than_days,
+        history_actions: args.history_actions,
+        clean_orphaned_history: args.clean_orphaned_history,
+        history_memory_ids: args.history_memory_ids,
+        rebuild_search_index: args.rebuild_search_index,
+        clean_orphaned_keywords: args.clean_orphaned_keywords,
+        clean_project_index: args.clean_project_index
       };
       
       return handleDeleteWorkMemory(deleteArgs);
@@ -427,7 +521,6 @@ export async function handleSystem(args: SystemOperationArgs): Promise<string> {
     case 'repair': {
       const repairArgs: IndexRepairArgs = {
         repair_missing: args.repair_missing !== false,
-        dry_run: args.dry_run || false,
         force_rebuild: args.force_rebuild || false
       };
       return handleIndexRepair(repairArgs);
