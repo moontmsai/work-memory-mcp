@@ -1,5 +1,5 @@
 import { Tool } from '@modelcontextprotocol/sdk/types.js';
-import { databaseManager } from '../database/connection.js';
+import databaseManager from '../database/connection.js';
 import { VersionManager } from '../history/version-manager.js';
 import { VersionInfo } from '../history/types.js';
 import { getCurrentISOString } from '../utils/index.js';

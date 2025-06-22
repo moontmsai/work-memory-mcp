@@ -1,5 +1,5 @@
 import { Tool } from '@modelcontextprotocol/sdk/types.js';
-import { databaseManager } from '../database/connection.js';
+import databaseManager from '../database/connection.js';
 
 export interface ConnectionMonitorArgs {
   include_performance?: boolean;

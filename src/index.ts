@@ -188,7 +188,7 @@ class WorkMemoryServer {
       }
       
       // better-sqlite3는 즉시 파일에 쓰므로 체크포인트 스케줄러 불필요
-      logger.serverStatus('Database initialization completed (better-sqlite3)');
+      logger.serverStatus('Database initialization completed ( 대대better-sqlite3)');
       
       // 🚀 세션 독점 관리자 초기화 (30분 타임아웃)
       try {
@@ -666,15 +666,17 @@ class WorkMemoryServer {
 
 // 서버 실행
 async function main() {
-  const server = new WorkMemoryServer();
-  await server.run();
+  try {
+    const server = new WorkMemoryServer();
+    await server.run();
+  } catch (error) {
+    // 최상위 레벨에서 발생하는 모든 오류를 명시적으로 로깅
+    console.error('[CRITICAL_ERROR] The MCP server failed to start.', error);
+    process.exit(1); // 오류 발생 시 비정상 종료
+  }
 }
 
-// 에러 핸들링과 함께 메인 함수 실행
-main().catch((error) => {
-  logger.error('STARTUP', 'Failed to start Work Memory MCP Server', {}, error as Error);
-  process.exit(1);
-});
+main();
 
 // 간단한 에러 핸들링 함수
 const withErrorHandling = (operation: string, toolName: string, handler: Function) => {

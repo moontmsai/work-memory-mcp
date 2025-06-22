@@ -74,5 +74,6 @@ export async function checkDatabaseHealth(): Promise<{ status: string; info: any
 }
 
 // 데이터베이스 연결 및 스키마 관련 함수들 export
-export { databaseManager, type DatabaseConnection } from './connection.js';
+export * from './schema.js';
+export { default as databaseManager, type DatabaseConnection } from './connection.js';
 export { SCHEMA_SQL } from './schema.js'; 

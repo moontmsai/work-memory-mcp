@@ -2,8 +2,11 @@ import { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { FileSystemManager } from '../utils/index.js';
 import { ChangeTracker } from '../history/change-tracker.js';
 import { VersionManager } from '../history/version-manager.js';
-import { databaseManager } from '../database/connection.js';
+import databaseManager from '../database/connection.js';
 import { ChangeType, HistoryQuery } from '../history/types.js';
+import { z } from 'zod';
+import { WorkMemory } from '../types/memory.js';
+import { ChangeLogEntry } from '../history/types.js';
 
 /**
  * get_work_memory_history MCP 도구
@@ -22,75 +25,59 @@ export interface GetWorkMemoryHistoryArgs {
   format?: 'summary' | 'detailed' | 'timeline';
 }
 
+const getWorkMemoryHistoryArgs = z.object({
+  id: z.string().describe('The ID of the work memory to get the history for.'),
+});
+
+const historyEntrySchema = z.object({
+  id: z.string(),
+  timestamp: z.string(),
+  changeType: z.string(),
+  memory_id: z.string(),
+  // Add other fields from ChangeLogEntry as needed
+});
+
 export const getWorkMemoryHistoryTool: Tool = {
   name: 'get_work_memory_history',
-  description: '메모리 변경 이력을 조회하고 검색합니다. 날짜별, 프로젝트별, 변경 유형별 필터링 지원',
+  description: 'Gets the change history for a specific work memory.',
   inputSchema: {
     type: 'object',
     properties: {
-      memory_id: {
-        type: 'string',
-        description: '특정 메모리의 이력만 조회 (선택사항)',
-        minLength: 1
-      },
-      project: {
-        type: 'string',
-        description: '특정 프로젝트의 이력만 조회 (선택사항)',
-        minLength: 1
-      },
-      change_type: {
-        oneOf: [
-          {
-            type: 'string',
-            enum: ['CREATE', 'UPDATE', 'DELETE', 'ARCHIVE', 'RESTORE']
-          },
-          {
-            type: 'array',
-            items: {
-              type: 'string',
-              enum: ['CREATE', 'UPDATE', 'DELETE', 'ARCHIVE', 'RESTORE']
-            }
-          }
-        ],
-        description: '변경 유형 필터 (선택사항)'
-      },
-      start_date: {
-        type: 'string',
-        description: '시작 날짜 (ISO 8601 형식, 예: 2024-01-01 또는 2024-01-01T00:00:00Z)',
-        pattern: '^\\d{4}-\\d{2}-\\d{2}(T\\d{2}:\\d{2}:\\d{2}(\\.\\d{3})?Z?)?$'
-      },
-      end_date: {
-        type: 'string',
-        description: '종료 날짜 (ISO 8601 형식, 예: 2024-12-31 또는 2024-12-31T23:59:59Z)',
-        pattern: '^\\d{4}-\\d{2}-\\d{2}(T\\d{2}:\\d{2}:\\d{2}(\\.\\d{3})?Z?)?$'
-      },
-      limit: {
-        type: 'integer',
-        description: '결과 개수 제한 (기본값: 50)',
-        minimum: 1,
-        maximum: 500,
-        default: 50
-      },
-      offset: {
-        type: 'integer',
-        description: '페이지네이션 오프셋 (기본값: 0)',
-        minimum: 0,
-        default: 0
-      },
-      include_versions: {
-        type: 'boolean',
-        description: '버전 정보 포함 여부 (기본값: false)',
-        default: false
-      },
-      format: {
-        type: 'string',
-        enum: ['summary', 'detailed', 'timeline'],
-        description: '출력 형식 (기본값: summary)',
-        default: 'summary'
-      }
+      id: { type: 'string', description: 'The ID of the work memory to get the history for.' },
     },
-    additionalProperties: false
-  }
+    required: ['id'],
+  },
+  outputSchema: {
+    type: 'object',
+    properties: {
+      history: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' },
+            timestamp: { type: 'string' },
+            changeType: { type: 'string' },
+            memory_id: { type: 'string' },
+          },
+        },
+      },
+    },
+  },
+  async execute(args: any): Promise<any> {
+    const { id } = args;
+    try {
+      const db = databaseManager.getConnection();
+      const history = await db.all(
+        'SELECT * FROM change_history WHERE memory_id = ? ORDER BY timestamp DESC',
+        [id]
+      );
+      return history as ChangeLogEntry[];
+    } catch (error) {
+      console.error(`Error getting history for memory ${id}:`, error);
+      throw error;
+    }
+  },
 };
 
 export async function handleGetWorkMemoryHistory(args: GetWorkMemoryHistoryArgs): Promise<string> {

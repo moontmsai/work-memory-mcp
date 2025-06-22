@@ -1,5 +1,5 @@
 import { Tool } from '@modelcontextprotocol/sdk/types.js';
-import { databaseManager } from '../database/connection.js';
+import databaseManager from '../database/connection.js';
 import { getCurrentISOString } from '../utils/index.js';
 import { globalProgressTracker } from '../progress/ProgressTracker.js';
 import { v4 as uuidv4 } from 'uuid';
