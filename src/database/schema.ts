@@ -18,6 +18,7 @@ export const SCHEMA_SQL = {
       access_count INTEGER DEFAULT 0,
       last_accessed_at TEXT DEFAULT (datetime('now')), -- ISO 8601 형식
       is_archived BOOLEAN DEFAULT FALSE,
+      archived_at TEXT, -- 아카이브된 시점
       -- 할일 관리 확장 필드
       context TEXT, -- 현재 상황, 배경 정보
       requirements TEXT, -- 구체적 요구사항
@@ -230,6 +231,7 @@ export const SCHEMA_SQL = {
     'CREATE INDEX IF NOT EXISTS idx_work_memories_created_at ON work_memories(created_at);',
     'CREATE INDEX IF NOT EXISTS idx_work_memories_importance_score ON work_memories(importance_score);',
     'CREATE INDEX IF NOT EXISTS idx_work_memories_is_archived ON work_memories(is_archived);',
+    'CREATE INDEX IF NOT EXISTS idx_work_memories_archived_at ON work_memories(archived_at);',
     'CREATE INDEX IF NOT EXISTS idx_work_memories_created_by ON work_memories(created_by);',
     'CREATE INDEX IF NOT EXISTS idx_work_memories_content_length ON work_memories(content_length);',
     'CREATE INDEX IF NOT EXISTS idx_work_memories_work_type ON work_memories(work_type);',
@@ -242,6 +244,7 @@ export const SCHEMA_SQL = {
     // keyword_normalized 컬럼이 제거되었으므로 이 인덱스도 제거
     'CREATE INDEX IF NOT EXISTS idx_search_keywords_source ON search_keywords(source);',
     'CREATE INDEX IF NOT EXISTS idx_search_keywords_weight ON search_keywords(weight);',
+    'CREATE INDEX IF NOT EXISTS idx_search_keywords_source_weight ON search_keywords(source, weight DESC);',
     'CREATE UNIQUE INDEX IF NOT EXISTS idx_search_keywords_unique ON search_keywords(memory_id, keyword);',
     
     // project_index 테이블 인덱스
@@ -395,6 +398,10 @@ async function migrateToDoFields(connection: DatabaseConnection): Promise<void> 
       await connection.run('ALTER TABLE work_memories ADD COLUMN session_id TEXT;');
     }
 
+    if (!existingColumns.includes('archived_at')) {
+      await connection.run('ALTER TABLE work_memories ADD COLUMN archived_at TEXT;');
+    }
+
     // importance 필드를 importance_score로 마이그레이션
     await migrateImportanceToScore(connection, existingColumns);
 
@@ -408,6 +415,9 @@ async function migrateToDoFields(connection: DatabaseConnection): Promise<void> 
     
     // session_id 인덱스 추가
     await connection.run('CREATE INDEX IF NOT EXISTS idx_work_memories_session_id ON work_memories(session_id);');
+    
+    // archived_at 인덱스 추가
+    await connection.run('CREATE INDEX IF NOT EXISTS idx_work_memories_archived_at ON work_memories(archived_at);');
     
   } catch (error) {
     // 마이그레이션 실패는 경고만 출력하고 계속 진행

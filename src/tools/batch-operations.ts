@@ -4,6 +4,7 @@ import { getCurrentISOString } from '../utils/index.js';
 import { globalProgressTracker } from '../progress/ProgressTracker.js';
 import { v4 as uuidv4 } from 'uuid';
 import { safeStringify } from '../utils/safe-json.js';
+import { SearchManager } from '../utils/search-manager.js';
 
 export interface BatchOperationArgs {
   operations: Array<{
@@ -152,19 +153,62 @@ export async function handleBatchOperations(args: BatchOperationArgs): Promise<s
         }
       });
 
-      // 배치 실행
+      // 배치 실행과 동시에 생성된 ID들 수집
+      const createdMemoryIds: string[] = [];
+      for (const [index, op] of args.operations.entries()) {
+        if (op.type === 'add') {
+          const id = op.data.id || `mem_${getCurrentISOString().replace(/[:.]/g, '').replace('T', '_').substring(0, 20)}_${Math.random().toString(36).substring(2, 8)}`;
+          createdMemoryIds.push(id);
+          // operations 배열의 실제 ID도 업데이트
+          operations[index].params[0] = id;
+        }
+      }
+
       await connection.batch(operations);
       successCount = operations.length;
 
+      // 배치 작업 후 인덱싱 처리
+      if (taskId) {
+        globalProgressTracker.updateProgress(taskId, 95, '인덱싱 처리 중...', '검색 키워드 추출 및 저장', successCount);
+      }
+      
+      const searchManager = new SearchManager();
+      let indexedCount = 0;
+      
+      // 실제 생성된 ID와 데이터를 매칭하여 인덱싱
+      for (const [index, op] of args.operations.entries()) {
+        if (op.type === 'add' && op.data.content && createdMemoryIds[index]) {
+          try {
+            const workMemory = {
+              id: createdMemoryIds[index], // 실제 생성된 ID 사용
+              content: op.data.content,
+              tags: op.data.tags || [],
+              project: op.data.project,
+              importance_score: op.data.importance_score || 50,
+              created_at: getCurrentISOString(),
+              updated_at: getCurrentISOString(),
+              created_by: op.data.created_by || 'batch',
+              access_count: 0
+            };
+            await searchManager.addToSearchIndex(workMemory);
+            indexedCount++;
+          } catch (indexError) {
+            // 인덱싱 실패는 배치 작업을 중단시키지 않음
+            console.warn(`Index creation failed for memory ${createdMemoryIds[index]}:`, indexError);
+          }
+        }
+      }
+
       // 진행률 완료
       if (taskId) {
-        globalProgressTracker.completeTask(taskId, `원자적 배치 작업 완료: ${successCount}개 처리`);
+        globalProgressTracker.completeTask(taskId, `원자적 배치 작업 완료: ${successCount}개 처리, ${indexedCount}개 인덱싱`);
       }
 
       const executionTime = Date.now() - startTime;
       
       return `✅ 배치 작업 완료 (원자적)
 🔄 처리된 작업: ${successCount}개
+🔍 인덱싱된 메모리: ${indexedCount}개
 ⏱️ 실행 시간: ${executionTime}ms
 ⚡ 성능: 단일 배치로 최적화`;
       
@@ -185,6 +229,8 @@ export async function handleBatchOperations(args: BatchOperationArgs): Promise<s
         
         try {
           let result;
+          let memoryToIndex: any = null;
+          
           switch (op.type) {
             case 'add':
               const id = op.data.id || `mem_${getCurrentISOString().replace(/[:.]/g, '').replace('T', '_').substring(0, 20)}_${Math.random().toString(36).substring(2, 8)}`;
@@ -202,6 +248,21 @@ export async function handleBatchOperations(args: BatchOperationArgs): Promise<s
                   getCurrentISOString()
                 ]
               );
+              
+              // 인덱싱을 위한 메모리 정보 저장
+              if (op.data.content) {
+                memoryToIndex = {
+                  id,
+                  content: op.data.content,
+                  tags: op.data.tags || [],
+                  project: op.data.project,
+                  importance_score: op.data.importance_score || 50,
+                  created_at: getCurrentISOString(),
+                  updated_at: getCurrentISOString(),
+                  created_by: op.data.created_by || 'batch',
+                  access_count: 0
+                };
+              }
               break;
             case 'update':
               result = await connection.run(
@@ -226,6 +287,17 @@ export async function handleBatchOperations(args: BatchOperationArgs): Promise<s
               break;
             default:
               throw new Error(`Unknown operation type: ${op.type}`);
+          }
+          
+          // 인덱싱 처리 (add 작업만)
+          if (memoryToIndex) {
+            try {
+              const searchManager = new SearchManager();
+              await searchManager.addToSearchIndex(memoryToIndex);
+            } catch (indexError) {
+              // 인덱싱 실패는 메모리 생성을 방해하지 않음
+              console.warn(`Index creation failed for memory ${memoryToIndex.id}:`, indexError);
+            }
           }
           
           results.push({ success: true, operation: op.type, result });

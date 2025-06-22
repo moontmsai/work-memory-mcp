@@ -7,6 +7,7 @@ import { validateWorkMemory } from '../utils/validation.js';
 import { VersionManager } from '../history/version-manager.js';
 import { WorkMemory } from '../types/memory.js';
 import { safeTagsStringify, safeStringify } from '../utils/safe-json.js';
+import { SearchManager } from '../utils/search-manager.js';
 
 export interface AddWorkMemoryArgs {
   content: string;
@@ -328,6 +329,26 @@ export async function handleAddWorkMemory(args: AddWorkMemoryArgs): Promise<stri
       console.warn('Failed to link memory to session:', sessionError);
       // 디버깅을 위해 에러 메시지를 결과에 포함
       sessionLinkResult.session_error = sessionError instanceof Error ? sessionError.message : String(sessionError);
+    }
+
+    // 검색 인덱싱 처리
+    try {
+      const searchManager = new SearchManager();
+      const workMemory: WorkMemory = {
+        id: memoryId,
+        content,
+        tags,
+        project: project || undefined,
+        importance_score: importanceScore,
+        created_at: now,
+        updated_at: now,
+        created_by: createdBy,
+        access_count: 0
+      };
+      await searchManager.addToSearchIndex(workMemory);
+    } catch (indexError) {
+      // 인덱싱 실패는 메모리 생성을 방해하지 않음
+      console.warn('Failed to create search index:', indexError);
     }
 
     const projectInfo = project ? ` (프로젝트: ${project})` : '';
