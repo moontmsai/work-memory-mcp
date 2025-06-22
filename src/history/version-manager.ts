@@ -6,6 +6,7 @@ import {
   VersionDifference 
 } from './types.js';
 import { WorkMemory } from '../types/memory.js';
+import { safeStringify, safeParse, extractSafeWorkMemory } from '../utils/safe-json.js';
 
 /**
  * SQLite 기반 메모리 버전 관리 클래스
@@ -43,7 +44,7 @@ export class VersionManager {
       // 새 버전 번호 생성
       const newVersionNumber = this.generateVersionNumber(existingVersions);
       
-      const dataString = JSON.stringify(memoryData);
+      const dataString = safeStringify(memoryData);
       const size = dataString.length;
 
       // 새 버전 생성
@@ -67,12 +68,25 @@ export class VersionManager {
         [result.lastInsertRowid]
       );
 
+      // 안전한 JSON 파싱 (한글 호환) - 기본 WorkMemory 구조 제공
+      const defaultMemory = {
+        id: memoryId,
+        content: '',
+        tags: [],
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        created_by: 'system',
+        access_count: 0,
+        importance_score: 50
+      };
+      const parsedData = safeParse(versionInfo.data, defaultMemory);
+
       return {
         version: versionInfo.version,
         timestamp: versionInfo.timestamp,
         changeLogId: versionInfo.change_log_id,
         memoryId: versionInfo.memory_id,
-        data: JSON.parse(versionInfo.data),
+        data: parsedData,
         size: versionInfo.size,
         description: versionInfo.description
       };
@@ -97,15 +111,30 @@ export class VersionManager {
       const params = limit ? [memoryId, limit] : [memoryId];
       const versions = await this.connection.all(query, params);
 
-      return versions.map(v => ({
-        version: v.version,
-        timestamp: v.timestamp,
-        changeLogId: v.change_log_id,
-        memoryId: v.memory_id,
-        data: JSON.parse(v.data),
-        size: v.size,
-        description: v.description
-      }));
+      return versions.map(v => {
+        // 안전한 JSON 파싱 (한글 호환) - 기본 WorkMemory 구조 제공
+        const defaultMemory = {
+          id: v.memory_id,
+          content: '',
+          tags: [],
+          created_at: v.timestamp,
+          updated_at: v.timestamp,
+          created_by: 'system',
+          access_count: 0,
+          importance_score: 50
+        };
+        const parsedData = safeParse(v.data, defaultMemory);
+
+        return {
+          version: v.version,
+          timestamp: v.timestamp,
+          changeLogId: v.change_log_id,
+          memoryId: v.memory_id,
+          data: parsedData,
+          size: v.size,
+          description: v.description
+        };
+      });
 
     } catch (error) {
       throw new Error(`Failed to get versions: ${error instanceof Error ? error.message : String(error)}`);
@@ -117,21 +146,37 @@ export class VersionManager {
    */
   async getVersion(memoryId: string, version: string): Promise<VersionInfo | null> {
     try {
+      // 버전 번호 정규화 (v1.0.0 → 1.0.0)
+      const normalizedVersion = version.startsWith('v') ? version.substring(1) : version;
+      
       const versionData = await this.connection.get(
         'SELECT * FROM memory_versions WHERE memory_id = ? AND version = ?',
-        [memoryId, version]
+        [memoryId, normalizedVersion]
       );
 
       if (!versionData) {
         return null;
       }
 
+      // 안전한 JSON 파싱 (한글 호환) - 기본 WorkMemory 구조 제공
+      const defaultMemory = {
+        id: memoryId,
+        content: '',
+        tags: [],
+        created_at: versionData.timestamp,
+        updated_at: versionData.timestamp,
+        created_by: 'system',
+        access_count: 0,
+        importance_score: 50
+      };
+      const parsedData = safeParse(versionData.data, defaultMemory);
+
       return {
         version: versionData.version,
         timestamp: versionData.timestamp,
         changeLogId: versionData.change_log_id,
         memoryId: versionData.memory_id,
-        data: JSON.parse(versionData.data),
+        data: parsedData,
         size: versionData.size,
         description: versionData.description
       };
@@ -200,7 +245,19 @@ export class VersionManager {
         throw new Error(`Version ${version} not found for memory ${memoryId}`);
       }
 
-      return versionInfo.data;
+      // 타입 안전한 WorkMemory 추출
+      const defaultMemory: WorkMemory = {
+        id: memoryId,
+        content: '',
+        tags: [],
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        created_by: 'system',
+        access_count: 0,
+        importance_score: 50
+      };
+
+      return extractSafeWorkMemory(versionInfo.data, defaultMemory);
 
     } catch (error) {
       throw new Error(`Failed to restore version: ${error instanceof Error ? error.message : String(error)}`);
@@ -329,7 +386,16 @@ export class VersionManager {
             timestamp: oldestVersion.timestamp,
             changeLogId: oldestVersion.change_log_id,
             memoryId: oldestVersion.memory_id,
-            data: JSON.parse(oldestVersion.data),
+            data: safeParse(oldestVersion.data, {
+              id: oldestVersion.memory_id,
+              content: '',
+              tags: [],
+              created_at: oldestVersion.timestamp,
+              updated_at: oldestVersion.timestamp,
+              created_by: 'system',
+              access_count: 0,
+              importance_score: 50
+            }),
             size: oldestVersion.size,
             description: oldestVersion.description
           } : undefined,
@@ -338,7 +404,16 @@ export class VersionManager {
             timestamp: newestVersion.timestamp,
             changeLogId: newestVersion.change_log_id,
             memoryId: newestVersion.memory_id,
-            data: JSON.parse(newestVersion.data),
+            data: safeParse(newestVersion.data, {
+              id: newestVersion.memory_id,
+              content: '',
+              tags: [],
+              created_at: newestVersion.timestamp,
+              updated_at: newestVersion.timestamp,
+              created_by: 'system',
+              access_count: 0,
+              importance_score: 50
+            }),
             size: newestVersion.size,
             description: newestVersion.description
           } : undefined

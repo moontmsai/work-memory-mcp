@@ -6,6 +6,7 @@ import { DatabaseConnection } from '../database/connection.js';
 import { validateWorkMemory } from '../utils/validation.js';
 import { VersionManager } from '../history/version-manager.js';
 import { WorkMemory } from '../types/memory.js';
+import { safeTagsStringify, safeStringify } from '../utils/safe-json.js';
 
 export interface AddWorkMemoryArgs {
   content: string;
@@ -120,12 +121,8 @@ export async function handleAddWorkMemory(args: AddWorkMemoryArgs): Promise<stri
     // worked 상태 결정 (자동 감지 또는 명시적 값)
     const worked = determineOptimalWorkedStatus(workType, resultContent, args.worked);
 
-    // 할일 저장 시 context 필수 검증
-    if (workType === 'todo') {
-      if (!context) {
-        throw new Error('할일 저장 시 context(배경정보)가 필요합니다.');
-      }
-    }
+    // 할일 저장 시 context 선택사항 (반드시 필수이지 않음)
+    // context는 배경 정보를 제공하지만 선택사항입니다.
 
     // 자동 서머리 생성
     const extractedContent = generateSummary(content, 200);
@@ -142,7 +139,7 @@ export async function handleAddWorkMemory(args: AddWorkMemoryArgs): Promise<stri
       content,
       extractedContent,
       project,
-      JSON.stringify(tags),
+      safeTagsStringify(tags),
       importanceScore,
       createdBy,
       now,
@@ -210,7 +207,7 @@ export async function handleAddWorkMemory(args: AddWorkMemoryArgs): Promise<stri
       'created',
       now,
       'New memory created via MCP',
-      JSON.stringify({ content, project, tags, importance_score: importanceScore, createdBy })
+      safeStringify({ content, project, tags, importance_score: importanceScore, createdBy })
     ]);
 
     // 6. 초기 버전 생성 (설정이 활성화된 경우)
@@ -242,8 +239,7 @@ export async function handleAddWorkMemory(args: AddWorkMemoryArgs): Promise<stri
         );
       }
     } catch (versionError) {
-      // 버전 생성 실패는 메모리 생성을 방해하지 않음
-      console.warn('Failed to create initial version:', versionError);
+      // 버전 생성 실패는 메모리 생성을 방해하지 않음 (로그 제거)
     }
 
     // 세션 자동 연동 (세션 시스템이 활성화된 경우)

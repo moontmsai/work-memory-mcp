@@ -82,53 +82,72 @@ export const getWorkMemoryHistoryTool: Tool = {
 
 export async function handleGetWorkMemoryHistory(args: GetWorkMemoryHistoryArgs): Promise<string> {
   try {
-    const fsManager = new FileSystemManager();
-    const changeTracker = new ChangeTracker(fsManager.getWorkMemoryDir());
     const connection = databaseManager.getConnection();
-    const versionManager = new VersionManager(connection);
-
-    // 쿼리 구성
-    const query: HistoryQuery = {
-      memoryId: args.memory_id,
-      projectName: args.project,
-      changeType: args.change_type,
-      startDate: args.start_date ? normalizeDate(args.start_date) : undefined,
-      endDate: args.end_date ? normalizeEndDate(args.end_date) : undefined,
-      limit: args.limit || 50,
-      offset: args.offset || 0
-    };
-
-    // 히스토리 조회
-    const historyResult = await changeTracker.queryHistory(query);
-
-    if (historyResult.entries.length === 0) {
-      return generateEmptyResult(query);
+    if (!connection) {
+      throw new Error('Database connection not available');
     }
 
-    // 버전 정보 포함 시 추가 조회
-    let versionInfoMap = new Map();
-    if (args.include_versions) {
-      for (const entry of historyResult.entries) {
-        if (entry.changeType === 'UPDATE') {
-          try {
-            const versions = await versionManager.getVersions(entry.memoryId, 5);
-            versionInfoMap.set(entry.memoryId, versions);
-          } catch (error) {
-            // 버전 정보 조회 실패 시 무시
-          }
+    // SQLite에서 직접 이력 조회
+    let sql = 'SELECT * FROM change_history WHERE memory_id = ?';
+    const params: any[] = [args.memory_id];
+    
+    // 날짜 필터 추가
+    if (args.start_date) {
+      sql += ' AND timestamp >= ?';
+      params.push(args.start_date);
+    }
+    if (args.end_date) {
+      sql += ' AND timestamp <= ?';
+      params.push(args.end_date);
+    }
+    
+    // 변경 유형 필터
+    if (args.change_type) {
+      const types = Array.isArray(args.change_type) ? args.change_type : [args.change_type];
+      sql += ' AND action IN (' + types.map(() => '?').join(',') + ')';
+      params.push(...types);
+    }
+    
+    sql += ' ORDER BY timestamp DESC';
+    
+    // 제한 및 오프셋
+    const limit = args.limit || 50;
+    const offset = args.offset || 0;
+    sql += ' LIMIT ? OFFSET ?';
+    params.push(limit, offset);
+
+    // 이력 조회 실행
+    const entries = await connection.all(sql, params);
+    
+    if (entries.length === 0) {
+      return `📄 메모리 ID ${args.memory_id}에 대한 이력이 없습니다.`;
+    }
+
+    // 결과 형식화
+    const format = args.format || 'summary';
+    let result = `📅 메모리 이력 (ID: ${args.memory_id})\n`;
+    result += `총 ${entries.length}개 이력\n\n`;
+
+    for (const entry of entries) {
+      const timestamp = new Date(entry.timestamp).toLocaleString('ko-KR');
+      const action = entry.action;
+      
+      if (format === 'detailed') {
+        result += `● ${timestamp} - ${action}\n`;
+        if (entry.details) {
+          result += `  세부: ${entry.details}\n`;
         }
+        if (entry.changed_fields) {
+          const fields = JSON.parse(entry.changed_fields);
+          result += `  변경된 필드: ${fields.join(', ')}\n`;
+        }
+        result += '\n';
+      } else {
+        result += `● ${timestamp} - ${action}\n`;
       }
     }
 
-    // 형식에 따른 결과 생성
-    switch (args.format) {
-      case 'detailed':
-        return generateDetailedResult(historyResult, versionInfoMap, query);
-      case 'timeline':
-        return generateTimelineResult(historyResult, versionInfoMap, query);
-      default:
-        return generateSummaryResult(historyResult, versionInfoMap, query);
-    }
+    return result;
 
   } catch (error) {
     return `❌ 히스토리 조회 중 오류가 발생했습니다: ${error instanceof Error ? error.message : '알 수 없는 오류'}`;

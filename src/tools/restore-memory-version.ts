@@ -5,6 +5,7 @@ import { VersionInfo } from '../history/types.js';
 import { getCurrentISOString } from '../utils/index.js';
 import { WorkMemory } from '../types/memory.js';
 import { normalizeTags, serializeTags } from '../utils/helpers.js';
+import { extractSafeWorkMemory, isValidWorkMemory } from '../utils/safe-json.js';
 
 /**
  * 메모리 버전 복구 인수 타입
@@ -24,7 +25,7 @@ export interface RestoreMemoryVersionArgs {
  * 메모리 버전 목록 조회 인수 타입
  */
 export interface ListMemoryVersionsArgs {
-  memory_id: string;
+  memory_id?: string; // 선택적 - 없으면 전체 목록
   limit?: number;
   include_data?: boolean;
   format?: 'summary' | 'detailed';
@@ -91,7 +92,7 @@ export const listMemoryVersionsTool: Tool = {
     properties: {
       memory_id: {
         type: 'string',
-        description: '조회할 메모리의 ID',
+        description: '조회할 메모리의 ID (선택사항 - 미지정시 전체 메모리의 버전 목록)',
         minLength: 1
       },
       limit: {
@@ -113,7 +114,7 @@ export const listMemoryVersionsTool: Tool = {
         default: 'summary'
       }
     },
-    required: ['memory_id']
+    required: []
   }
 };
 
@@ -153,6 +154,21 @@ export async function handleRestoreMemoryVersion(args: RestoreMemoryVersionArgs)
       throw error;
     });
 
+    // 2.5. 대상 버전 데이터 유효성 검사
+    if (!targetVersion.data || typeof targetVersion.data !== 'object') {
+      return `❌ 대상 버전의 데이터가 손상되었거나 읽을 수 없습니다.`;
+    }
+    
+    // 데이터 무결성 확인
+    if ('error' in targetVersion.data && (targetVersion.data as any).error === 'Invalid JSON data') {
+      return `❌ 대상 버전의 데이터가 손상되어 복구할 수 없습니다. 버전: ${targetVersion.version}`;
+    }
+    
+    // WorkMemory 타입 유효성 검사 (완전하지 않아도 복구 시도)
+    if (!isValidWorkMemory(targetVersion.data)) {
+      // 로그 출력 제거 - MCP 프로토콜 안전성을 위해
+    }
+
     // 3. 미리보기 모드
     if (args.restore_mode === 'preview') {
       return formatRestorePreview(currentMemory, targetVersion, args.selective_fields);
@@ -170,16 +186,21 @@ export async function handleRestoreMemoryVersion(args: RestoreMemoryVersionArgs)
     let backupVersion: any = null;
     if (args.create_backup !== false) {
       try {
+        // 현재 메모리 데이터 검증
+        if (!currentMemory) {
+          throw new Error('현재 메모리 데이터를 찾을 수 없습니다');
+        }
+
         const currentData: WorkMemory = {
           id: currentMemory.id,
-          content: currentMemory.content,
-          project: currentMemory.project,
-          tags: JSON.parse(currentMemory.tags || '[]'),
+          content: currentMemory.content || '',
+          project: currentMemory.project || '',
+          tags: currentMemory.tags ? JSON.parse(currentMemory.tags) : [],
           created_at: currentMemory.created_at,
           updated_at: currentMemory.updated_at,
-          created_by: currentMemory.created_by,
-          access_count: currentMemory.access_count,
-          importance_score: currentMemory.importance_score
+          created_by: currentMemory.created_by || 'system',
+          access_count: currentMemory.access_count || 0,
+          importance_score: currentMemory.importance_score || 50
         };
 
         backupVersion = await versionManager.createVersion(
@@ -196,26 +217,42 @@ export async function handleRestoreMemoryVersion(args: RestoreMemoryVersionArgs)
     // 6. 복구 실행
     try {
       const now = getCurrentISOString();
-      let restoredData = targetVersion.data;
+      
+      // 타입 안전한 기본 메모리 구조 준비
+      const defaultMemory: WorkMemory = {
+        id: currentMemory.id,
+        content: currentMemory.content || '',
+        project: currentMemory.project || '',
+        tags: [],
+        created_at: currentMemory.created_at,
+        updated_at: now,
+        created_by: currentMemory.created_by || 'system',
+        access_count: currentMemory.access_count || 0,
+        importance_score: currentMemory.importance_score || 50
+      };
+      
+      // 복구할 데이터 안전하게 추출 및 복사
+      const safeTargetData = extractSafeWorkMemory(targetVersion.data, defaultMemory);
+      
+      let restoredData: WorkMemory = {
+        ...defaultMemory,
+        content: safeTargetData.content || '',
+        project: safeTargetData.project || '',
+        tags: Array.isArray(safeTargetData.tags) ? safeTargetData.tags : [],
+        created_by: safeTargetData.created_by || defaultMemory.created_by,
+        importance_score: typeof safeTargetData.importance_score === 'number' 
+          ? safeTargetData.importance_score 
+          : defaultMemory.importance_score,
+        updated_at: now
+      };
 
       if (args.restore_mode === 'selective' && args.selective_fields) {
         // 선택적 복구: 지정된 필드만 복구
-        const currentData = {
-          id: currentMemory.id,
-          content: currentMemory.content,
-          project: currentMemory.project,
-          tags: JSON.parse(currentMemory.tags || '[]'),
-          created_at: currentMemory.created_at,
-          updated_at: currentMemory.updated_at,
-          created_by: currentMemory.created_by,
-          access_count: currentMemory.access_count,
-          importance_score: currentMemory.importance_score
-        };
-
-        restoredData = { ...currentData };
+        restoredData = { ...defaultMemory };
+        
         for (const field of args.selective_fields) {
-          if (field in targetVersion.data) {
-            (restoredData as any)[field] = targetVersion.data[field];
+          if (field in safeTargetData && (safeTargetData as any)[field] !== undefined) {
+            (restoredData as any)[field] = (safeTargetData as any)[field];
           }
         }
         restoredData.updated_at = now;
@@ -309,24 +346,44 @@ export async function handleListMemoryVersions(args: ListMemoryVersionsArgs): Pr
   try {
     const connection = databaseManager.getConnection();
 
-    // 메모리 존재 확인
-    const memory = await connection.get(
-      'SELECT id, content FROM work_memories WHERE id = ? AND is_archived = 0',
-      [args.memory_id]
-    );
+    if (args.memory_id) {
+      // 특정 메모리의 버전 목록
+      const memory = await connection.get(
+        'SELECT id, content FROM work_memories WHERE id = ? AND is_archived = 0',
+        [args.memory_id]
+      );
 
-    if (!memory) {
-      return `❌ ID '${args.memory_id}'인 메모리를 찾을 수 없습니다.`;
+      if (!memory) {
+        return `❌ ID '${args.memory_id}'인 메모리를 찾을 수 없습니다.`;
+      }
+
+      const versionManager = new VersionManager(connection);
+      const versions = await versionManager.getVersions(args.memory_id, args.limit);
+
+      if (versions.length === 0) {
+        return `📝 메모리 '${args.memory_id}'에는 아직 버전이 없습니다.`;
+      }
+
+      return formatVersionsList(versions, args.format || 'summary', args.include_data || false);
+    } else {
+      // 전체 메모리의 버전 목록
+      const limit = args.limit || 50;
+      const query = `
+        SELECT mv.*, wm.content as memory_content 
+        FROM memory_versions mv
+        LEFT JOIN work_memories wm ON mv.memory_id = wm.id
+        ORDER BY mv.timestamp DESC
+        LIMIT ?
+      `;
+      
+      const allVersions = await connection.all(query, [limit]);
+
+      if (allVersions.length === 0) {
+        return `📝 시스템에 저장된 버전이 없습니다.`;
+      }
+
+      return formatGlobalVersionsList(allVersions, args.format || 'summary', args.include_data || false);
     }
-
-    const versionManager = new VersionManager(connection);
-    const versions = await versionManager.getVersions(args.memory_id, args.limit);
-
-    if (versions.length === 0) {
-      return `📝 메모리 '${args.memory_id}'에는 아직 버전이 없습니다.`;
-    }
-
-    return formatVersionsList(versions, args.format || 'summary', args.include_data || false);
 
   } catch (error) {
     return `❌ 버전 목록 조회 중 오류가 발생했습니다: ${error instanceof Error ? error.message : '알 수 없는 오류'}`;
@@ -424,6 +481,65 @@ function formatVersionsList(versions: any[], format: string, includeData: boolea
       result += '\n';
     }
   });
+
+  return result;
+}
+
+/**
+ * 전체 버전 목록 포맷팅
+ */
+function formatGlobalVersionsList(versions: any[], format: string, includeData: boolean): string {
+  let result = `🌍 전체 버전 목록 (총 ${versions.length}개)\n\n`;
+
+  // 메모리별로 그룹화
+  const versionsByMemory = new Map<string, any[]>();
+  versions.forEach(version => {
+    const memoryId = version.memory_id;
+    if (!versionsByMemory.has(memoryId)) {
+      versionsByMemory.set(memoryId, []);
+    }
+    versionsByMemory.get(memoryId)!.push(version);
+  });
+
+  let memoryIndex = 1;
+  for (const [memoryId, memoryVersions] of versionsByMemory.entries()) {
+    const memoryContent = memoryVersions[0]?.memory_content;
+    const shortContent = memoryContent ? 
+      (memoryContent.length > 40 ? memoryContent.substring(0, 40) + '...' : memoryContent) : 
+      '내용 없음';
+    
+    result += `${memoryIndex}. 📝 메모리 ${memoryId}\n`;
+    result += `   💭 내용: ${shortContent}\n`;
+    result += `   📦 버전 수: ${memoryVersions.length}개\n`;
+    
+    if (format === 'detailed') {
+      memoryVersions.forEach((version, versionIndex) => {
+        const date = new Date(version.timestamp).toLocaleString('ko-KR', {
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit'
+        });
+        
+        result += `     ${versionIndex + 1}) v${version.version} (${date}) - ${formatBytes(version.size)}\n`;
+        if (version.description && version.description !== 'Auto-generated version') {
+          result += `        📝 ${version.description}\n`;
+        }
+      });
+    } else {
+      const latestVersion = memoryVersions[0];
+      const date = new Date(latestVersion.timestamp).toLocaleString('ko-KR', {
+        month: '2-digit', 
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+      result += `   🕒 최신: v${latestVersion.version} (${date})\n`;
+    }
+    
+    result += '\n';
+    memoryIndex++;
+  }
 
   return result;
 }

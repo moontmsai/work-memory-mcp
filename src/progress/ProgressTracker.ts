@@ -39,7 +39,14 @@ export class ProgressTracker extends EventEmitter {
   private tasks: Map<string, ProgressInfo> = new Map();
   private callbacks: Map<string, ProgressCallback[]> = new Map();
   private timers: Map<string, NodeJS.Timeout> = new Map();
-  // SSE 연동 제거됨 - 진행률은 EventEmitter 이벤트로만 제공
+  private readonly MAX_TASKS = 100; // 최대 동시 작업 수
+  private readonly CLEANUP_INTERVAL = 3600000; // 1시간마다 정리
+  
+  constructor() {
+    super();
+    // 주기적 정리 스케줄러 시작
+    this.startPeriodicCleanup();
+  }
 
   // SSE 연동 기능이 제거되었습니다
 
@@ -47,6 +54,11 @@ export class ProgressTracker extends EventEmitter {
    * 새 작업 시작
    */
   startTask(options: ProgressOptions): void {
+    // 작업 수 제한 확인
+    if (this.tasks.size >= this.MAX_TASKS) {
+      this.cleanupOldestTasks(10); // 오래된 작업 10개 정리
+    }
+
     const taskInfo: ProgressInfo = {
       taskId: options.taskId,
       progress: 0,
@@ -58,8 +70,6 @@ export class ProgressTracker extends EventEmitter {
 
     this.tasks.set(options.taskId, taskInfo);
     this.emit('taskStarted', taskInfo);
-    
-    // 진행률은 EventEmitter 이벤트로만 제공됩니다
     
     // 초기 진행률 전송
     this.notifyProgress(options.taskId);
@@ -255,6 +265,87 @@ export class ProgressTracker extends EventEmitter {
       `${phaseNames[phase]} 중...`,
       details
     );
+  }
+
+  /**
+   * 주기적 정리 스케줄러 시작
+   */
+  private startPeriodicCleanup(): void {
+    setInterval(() => {
+      this.performPeriodicCleanup();
+    }, this.CLEANUP_INTERVAL);
+  }
+
+  /**
+   * 주기적 정리 수행
+   */
+  private performPeriodicCleanup(): void {
+    const now = Date.now();
+    const oneHourAgo = now - this.CLEANUP_INTERVAL;
+    
+    let cleanedCount = 0;
+    
+    for (const [taskId, task] of this.tasks.entries()) {
+      // 1시간 이상 된 완료된 작업 정리
+      if (task.lastUpdate.getTime() < oneHourAgo && task.progress === 100) {
+        this.tasks.delete(taskId);
+        this.callbacks.delete(taskId);
+        
+        const timer = this.timers.get(taskId);
+        if (timer) {
+          clearTimeout(timer);
+          this.timers.delete(taskId);
+        }
+        
+        cleanedCount++;
+      }
+    }
+    
+    // 메모리 사용량 경고
+    if (this.tasks.size > this.MAX_TASKS * 0.8) {
+      console.warn(`ProgressTracker: High memory usage - ${this.tasks.size} active tasks`);
+    }
+  }
+
+  /**
+   * 가장 오래된 작업들 정리
+   */
+  private cleanupOldestTasks(count: number): void {
+    const taskEntries = Array.from(this.tasks.entries())
+      .sort(([, a], [, b]) => a.lastUpdate.getTime() - b.lastUpdate.getTime());
+    
+    for (let i = 0; i < Math.min(count, taskEntries.length); i++) {
+      const [taskId] = taskEntries[i];
+      this.tasks.delete(taskId);
+      this.callbacks.delete(taskId);
+      
+      const timer = this.timers.get(taskId);
+      if (timer) {
+        clearTimeout(timer);
+        this.timers.delete(taskId);
+      }
+    }
+  }
+
+  /**
+   * 메모리 사용량 조회
+   */
+  getMemoryUsage(): {
+    activeTasks: number;
+    activeCallbacks: number;
+    activeTimers: number;
+    memoryEstimate: string;
+  } {
+    const taskSize = this.tasks.size * 500; // 작업당 약 500바이트 추정
+    const callbackSize = Array.from(this.callbacks.values()).reduce((sum, arr) => sum + arr.length, 0) * 100;
+    const timerSize = this.timers.size * 50;
+    
+    return {
+      activeTasks: this.tasks.size,
+      activeCallbacks: Array.from(this.callbacks.values()).reduce((sum, arr) => sum + arr.length, 0),
+      activeTimers: this.timers.size,
+      memoryEstimate: `${Math.round((taskSize + callbackSize + timerSize) / 1024)}KB`
+    };
   }
 }
 

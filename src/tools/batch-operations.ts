@@ -3,6 +3,7 @@ import databaseManager from '../database/connection.js';
 import { getCurrentISOString } from '../utils/index.js';
 import { globalProgressTracker } from '../progress/ProgressTracker.js';
 import { v4 as uuidv4 } from 'uuid';
+import { safeStringify } from '../utils/safe-json.js';
 
 export interface BatchOperationArgs {
   operations: Array<{
@@ -65,17 +66,32 @@ export async function handleBatchOperations(args: BatchOperationArgs): Promise<s
   const startTime = Date.now();
   let taskId: string | undefined;
 
-  // 진행률 추적 설정
-  if (args.enable_progress) {
-    taskId = args.progress_task_id || uuidv4();
-    globalProgressTracker.startTask({
-      taskId,
-      totalItems: args.operations.length
-    });
-  }
-
   try {
+    // 입력 검증
+    if (!args.operations || !Array.isArray(args.operations) || args.operations.length === 0) {
+      throw new Error('작업 목록이 비어있거나 올바르지 않습니다.');
+    }
+
+    // 배치 크기 제한
+    const MAX_BATCH_SIZE = 1000;
+    if (args.operations.length > MAX_BATCH_SIZE) {
+      throw new Error(`배치 크기가 너무 큽니다. 최대 ${MAX_BATCH_SIZE}개까지 처리 가능합니다.`);
+    }
+
+    // 진행률 추적 설정
+    if (args.enable_progress) {
+      taskId = args.progress_task_id || uuidv4();
+      globalProgressTracker.startTask({
+        taskId,
+        totalItems: args.operations.length
+      });
+    }
+
     const connection = databaseManager.getConnection();
+    if (!connection) {
+      throw new Error('데이터베이스 연결을 가져올 수 없습니다.');
+    }
+
     const results: any[] = [];
     let successCount = 0;
     let errorCount = 0;
@@ -105,7 +121,7 @@ export async function handleBatchOperations(args: BatchOperationArgs): Promise<s
                 id,
                 op.data.content,
                 op.data.project || '',
-                JSON.stringify(op.data.tags || []),
+                safeStringify(op.data.tags || []),
                 op.data.importance_score || 50,
                 op.data.created_by || 'batch',
                 getCurrentISOString(),
@@ -120,7 +136,7 @@ export async function handleBatchOperations(args: BatchOperationArgs): Promise<s
               params: [
                 op.data.content,
                 op.data.project,
-                JSON.stringify(op.data.tags || []),
+                safeStringify(op.data.tags || []),
                 op.data.importance_score,
                 getCurrentISOString(),
                 op.data.id
@@ -179,7 +195,7 @@ export async function handleBatchOperations(args: BatchOperationArgs): Promise<s
                   id,
                   op.data.content,
                   op.data.project || '',
-                  JSON.stringify(op.data.tags || []),
+                  safeStringify(op.data.tags || []),
                   op.data.importance_score || 50,
                   op.data.created_by || 'batch',
                   getCurrentISOString(),
@@ -195,7 +211,7 @@ export async function handleBatchOperations(args: BatchOperationArgs): Promise<s
                 [
                   op.data.content,
                   op.data.project,
-                  JSON.stringify(op.data.tags || []),
+                  safeStringify(op.data.tags || []),
                   op.data.importance_score,
                   getCurrentISOString(),
                   op.data.id
@@ -245,6 +261,55 @@ export async function handleBatchOperations(args: BatchOperationArgs): Promise<s
     }
     
     const executionTime = Date.now() - startTime;
-    return `❌ 배치 작업 실패 (${executionTime}ms): ${error instanceof Error ? error.message : '알 수 없는 오류'}`;
+    
+    // 에러 타입별 세분화된 처리
+    let errorMessage = '알 수 없는 오류';
+    let errorCode = 'UNKNOWN_ERROR';
+    
+    if (error instanceof Error) {
+      errorMessage = error.message;
+      
+      // 특정 에러 패턴 감지
+      if (error.message.includes('SQLITE_BUSY')) {
+        errorCode = 'DATABASE_BUSY';
+        errorMessage = '데이터베이스가 사용 중입니다. 잠시 후 다시 시도해주세요.';
+      } else if (error.message.includes('SQLITE_LOCKED')) {
+        errorCode = 'DATABASE_LOCKED';
+        errorMessage = '데이터베이스가 잠겨있습니다. 다른 작업이 완료될 때까지 기다려주세요.';
+      } else if (error.message.includes('JSON')) {
+        errorCode = 'JSON_ERROR';
+        errorMessage = 'JSON 처리 중 오류가 발생했습니다. 데이터 형식을 확인해주세요.';
+      } else if (error.message.includes('메모리') || error.message.includes('memory')) {
+        errorCode = 'MEMORY_ERROR';
+        errorMessage = '메모리 부족으로 작업을 완료할 수 없습니다. 배치 크기를 줄여주세요.';
+      } else if (error.message.includes('타임아웃') || error.message.includes('timeout')) {
+        errorCode = 'TIMEOUT_ERROR';
+        errorMessage = '작업 처리 시간이 초과되었습니다. 배치 크기를 줄이거나 나중에 다시 시도해주세요.';
+      }
+    }
+    
+    return `❌ 배치 작업 실패 (${executionTime}ms)
+📋 오류 코드: ${errorCode}
+💬 오류 메시지: ${errorMessage}
+🔧 권장사항: ${getErrorRecommendation(errorCode)}`;
+  }
+}
+
+/**
+ * 에러 코드별 권장사항 반환
+ */
+function getErrorRecommendation(errorCode: string): string {
+  switch (errorCode) {
+    case 'DATABASE_BUSY':
+    case 'DATABASE_LOCKED':
+      return '잠시 기다린 후 다시 시도하거나, 동시 작업 수를 줄여보세요.';
+    case 'JSON_ERROR':
+      return '한글 태그나 특수문자가 포함된 데이터는 안전한 JSON 처리를 사용합니다.';
+    case 'MEMORY_ERROR':
+      return '배치 크기를 500개 이하로 줄이거나 여러 번에 나누어 처리하세요.';
+    case 'TIMEOUT_ERROR':
+      return '배치 크기를 줄이거나 네트워크 상태를 확인해보세요.';
+    default:
+      return '문제가 지속되면 시스템 로그를 확인하거나 관리자에게 문의하세요.';
   }
 }

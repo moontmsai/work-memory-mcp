@@ -3,6 +3,7 @@ import { getDatabaseConnection } from '../database/index.js';
 import { getCurrentISOString, determineOptimalWorkedStatus, getWorkedEmoji, getWorkedDisplayText } from '../utils/index.js';
 import { VersionManager } from '../history/version-manager.js';
 import { WorkMemory } from '../types/memory.js';
+import { safeStringify, safeParse, safeTagsStringify, safeTagsParse } from '../utils/safe-json.js';
 
 export interface UpdateWorkMemoryArgs {
   memory_id: string;
@@ -120,12 +121,12 @@ export async function handleUpdateWorkMemory(args: UpdateWorkMemoryArgs): Promis
     const now = getCurrentISOString();
     const updatedBy = args.updated_by || 'unknown';
     
-    // 변경사항 추적을 위한 기존 데이터
+    // 변경사항 추적을 위한 기존 데이터 (안전한 JSON 처리)
     const oldData: WorkMemory = {
       id: existingMemory.id,
       content: existingMemory.content,
       project: existingMemory.project,
-      tags: JSON.parse(existingMemory.tags || '[]'),
+      tags: safeTagsParse(existingMemory.tags || '[]'),
       created_at: existingMemory.created_at,
       updated_at: existingMemory.updated_at,
       created_by: existingMemory.created_by,
@@ -157,7 +158,9 @@ export async function handleUpdateWorkMemory(args: UpdateWorkMemoryArgs): Promis
 
     // 중요도 업데이트
     if (args.importance !== undefined && args.importance !== existingMemory.importance) {
-      updates.importance = args.importance;
+      // importance 필드를 importance_score 숫자로 변환
+      const scoreMap = { 'low': 25, 'medium': 50, 'high': 75 };
+      updates.importance_score = scoreMap[args.importance] || 50;
       hasChanges = true;
       changes.push('중요도 변경');
     }
@@ -212,8 +215,8 @@ export async function handleUpdateWorkMemory(args: UpdateWorkMemoryArgs): Promis
                             args.content.trim().length > 0;
     
     if (isToDoCompletion) {
-      // 할일 완료 시 자동으로 '완료한작업' 태그 설정
-      const newTagsJson = JSON.stringify(['완료한작업']);
+      // 할일 완료 시 자동으로 '완료한작업' 태그 설정 (안전한 JSON 처리)
+      const newTagsJson = safeTagsStringify(['완료한작업']);
       if (newTagsJson !== existingMemory.tags) {
         updates.tags = newTagsJson;
         hasChanges = true;
@@ -221,7 +224,7 @@ export async function handleUpdateWorkMemory(args: UpdateWorkMemoryArgs): Promis
       }
     } else if (args.tags !== undefined) {
       // 그 외 모든 경우 (일반 메모리 업데이트, 미완료 할일 태그 변경 등)
-      const newTagsJson = JSON.stringify(args.tags);
+      const newTagsJson = safeTagsStringify(args.tags);
       if (newTagsJson !== existingMemory.tags) {
         updates.tags = newTagsJson;
         hasChanges = true;
@@ -242,7 +245,7 @@ export async function handleUpdateWorkMemory(args: UpdateWorkMemoryArgs): Promis
       [...updateValues, args.memory_id]
     );
 
-    // 4. 변경 히스토리 기록
+    // 4. 변경 히스토리 기록 (안전한 JSON 처리)
     const changeResult = await connection.run(`
       INSERT INTO change_history (
         memory_id, action, timestamp, details, old_data, new_data
@@ -252,8 +255,8 @@ export async function handleUpdateWorkMemory(args: UpdateWorkMemoryArgs): Promis
       'updated',
       now,
       `Memory updated via MCP: ${changes.join(', ')}`,
-      JSON.stringify(oldData),
-      JSON.stringify({ ...oldData, ...updates })
+      safeStringify(oldData),
+      safeStringify({ ...oldData, ...updates })
     ]);
 
     // 5. 태그 인덱스 업데이트 (태그가 변경된 경우)
@@ -264,8 +267,8 @@ export async function handleUpdateWorkMemory(args: UpdateWorkMemoryArgs): Promis
         [args.memory_id, 'tags']
       );
 
-      // 새 태그 키워드 추가
-      const newTags = JSON.parse(updates.tags);
+      // 새 태그 키워드 추가 (안전한 JSON 처리)
+      const newTags = safeTagsParse(updates.tags);
       for (const tag of newTags) {
         await connection.run(`
           INSERT OR IGNORE INTO search_keywords (
@@ -343,9 +346,9 @@ export async function handleUpdateWorkMemory(args: UpdateWorkMemoryArgs): Promis
           versionInfo = `\n🔄 새 버전 생성: ${version.version}`;
         }
       } catch (versionError) {
-        // 버전 생성 실패는 업데이트를 방해하지 않음
-        console.warn('Failed to create version during update:', versionError);
-        versionInfo = '\n⚠️ 버전 생성 실패 (업데이트는 완료됨)';
+        // 버전 생성 실패 시 디버그 로깅만 (경고 메시지 제거)
+        console.debug('Version creation skipped or failed:', versionError);
+        versionInfo = '';
       }
     }
 

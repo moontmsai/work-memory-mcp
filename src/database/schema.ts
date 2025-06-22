@@ -161,6 +161,67 @@ export const SCHEMA_SQL = {
     );
   `,
 
+  // 세션 백업 테이블
+  SESSION_BACKUPS: `
+    CREATE TABLE IF NOT EXISTS session_backups (
+      backup_id TEXT PRIMARY KEY,
+      original_session_id TEXT NOT NULL,
+      session_data TEXT NOT NULL,
+      memories_data TEXT,
+      backup_reason TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      backup_size INTEGER,
+      compressed BOOLEAN DEFAULT FALSE
+    );
+  `,
+
+  // 세션 종료 로그 테이블
+  SESSION_TERMINATION_LOG: `
+    CREATE TABLE IF NOT EXISTS session_termination_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL,
+      termination_reason TEXT,
+      initiated_by TEXT,
+      forced INTEGER DEFAULT 0,
+      cleanup_success INTEGER DEFAULT 0,
+      memories_processed INTEGER DEFAULT 0,
+      links_removed INTEGER DEFAULT 0,
+      execution_time_ms INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now')),
+      error_details TEXT
+    );
+  `,
+
+  // 세션 임시 데이터 테이블
+  SESSION_TEMP_DATA: `
+    CREATE TABLE IF NOT EXISTS session_temp_data (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL,
+      data_key TEXT NOT NULL,
+      data_value TEXT,
+      data_type TEXT DEFAULT 'string',
+      expires_at TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      UNIQUE(session_id, data_key)
+    );
+  `,
+
+  // 세션 캐시 테이블
+  SESSION_CACHE: `
+    CREATE TABLE IF NOT EXISTS session_cache (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL,
+      cache_key TEXT NOT NULL,
+      cache_value TEXT,
+      cache_type TEXT DEFAULT 'string',
+      expires_at TEXT,
+      access_count INTEGER DEFAULT 0,
+      last_accessed_at TEXT DEFAULT (datetime('now')),
+      created_at TEXT DEFAULT (datetime('now')),
+      UNIQUE(session_id, cache_key)
+    );
+  `,
+
   // 인덱스 생성
   INDEXES: [
     // work_memories 테이블 인덱스
@@ -228,7 +289,29 @@ export const SCHEMA_SQL = {
     // work_sessions 복합 인덱스
     'CREATE INDEX IF NOT EXISTS idx_work_sessions_status_activity ON work_sessions(status, last_activity_at DESC);',
     'CREATE INDEX IF NOT EXISTS idx_work_sessions_project_status ON work_sessions(project_name, status);',
-    'CREATE INDEX IF NOT EXISTS idx_work_sessions_active_projects ON work_sessions(project_normalized, status) WHERE status = \'active\';'
+    'CREATE INDEX IF NOT EXISTS idx_work_sessions_active_projects ON work_sessions(project_normalized, status) WHERE status = \'active\';',
+    
+    // session_backups 테이블 인덱스
+    'CREATE INDEX IF NOT EXISTS idx_session_backups_original_session ON session_backups(original_session_id);',
+    'CREATE INDEX IF NOT EXISTS idx_session_backups_created_at ON session_backups(created_at);',
+    'CREATE INDEX IF NOT EXISTS idx_session_backups_reason ON session_backups(backup_reason);',
+    
+    // session_termination_log 테이블 인덱스
+    'CREATE INDEX IF NOT EXISTS idx_session_termination_session_id ON session_termination_log(session_id);',
+    'CREATE INDEX IF NOT EXISTS idx_session_termination_created_at ON session_termination_log(created_at);',
+    'CREATE INDEX IF NOT EXISTS idx_session_termination_reason ON session_termination_log(termination_reason);',
+    'CREATE INDEX IF NOT EXISTS idx_session_termination_success ON session_termination_log(cleanup_success);',
+    
+    // session_temp_data 테이블 인덱스
+    'CREATE INDEX IF NOT EXISTS idx_session_temp_data_session_id ON session_temp_data(session_id);',
+    'CREATE INDEX IF NOT EXISTS idx_session_temp_data_expires_at ON session_temp_data(expires_at);',
+    'CREATE INDEX IF NOT EXISTS idx_session_temp_data_created_at ON session_temp_data(created_at);',
+    
+    // session_cache 테이블 인덱스
+    'CREATE INDEX IF NOT EXISTS idx_session_cache_session_id ON session_cache(session_id);',
+    'CREATE INDEX IF NOT EXISTS idx_session_cache_expires_at ON session_cache(expires_at);',
+    'CREATE INDEX IF NOT EXISTS idx_session_cache_last_accessed ON session_cache(last_accessed_at);',
+    'CREATE INDEX IF NOT EXISTS idx_session_cache_access_count ON session_cache(access_count);'
   ]
 };
 
@@ -258,6 +341,10 @@ export async function initializeSchema(connection: DatabaseConnection): Promise<
     await connection.run(SCHEMA_SQL.CHANGE_HISTORY);
     await connection.run(SCHEMA_SQL.ARCHIVED_MEMORIES);
     await connection.run(SCHEMA_SQL.MEMORY_VERSIONS);
+    await connection.run(SCHEMA_SQL.SESSION_BACKUPS);
+    await connection.run(SCHEMA_SQL.SESSION_TERMINATION_LOG);
+    await connection.run(SCHEMA_SQL.SESSION_TEMP_DATA);
+    await connection.run(SCHEMA_SQL.SESSION_CACHE);
 
     // 인덱스 생성
     for (const indexSql of SCHEMA_SQL.INDEXES) {

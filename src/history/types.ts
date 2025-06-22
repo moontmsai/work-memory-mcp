@@ -55,7 +55,7 @@ export interface VersionInfo {
   timestamp: string;
   changeLogId?: number;
   memoryId: string;
-  data: WorkMemory;
+  data: WorkMemory | { error: string; raw: any; };
   size: number;
   description?: string;
 }

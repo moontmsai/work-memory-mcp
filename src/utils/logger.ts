@@ -142,8 +142,8 @@ class Logger {
   }
 
   private outputToConsole(entry: LogEntry): void {
-    // MCP StdioServerTransport 사용 시 console 출력이 JSON-RPC를 간섭하므로 완전히 비활성화
-    return;
+    // MCP 프로토콜 준수: stdout은 JSON-RPC 전용, 로그는 완전 비활성화
+    // 모든 로그 출력은 MCP 클라이언트 파싱 오류를 방지하기 위해 차단
   }
 
   debug(component: string, message: string, data?: any): void {

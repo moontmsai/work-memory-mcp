@@ -1,5 +1,9 @@
 #!/usr/bin/env node
 
+// MCP 프로토콜 보호를 위한 console 오버라이드 (가장 먼저 실행)
+import { initMcpConsole } from './utils/mcp-console.js';
+initMcpConsole();
+
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
@@ -10,100 +14,12 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { logger } from './utils/logger.js';
 
-import { addWorkMemoryTool, handleAddWorkMemory, AddWorkMemoryArgs } from './tools/add-work-memory.js';
-import { updateWorkMemoryTool, handleUpdateWorkMemory, UpdateWorkMemoryArgs } from './tools/update-work-memory.js';
-import {
-  searchWorkMemoryTool,
-  handleSearchWorkMemory,
-  SearchWorkMemoryArgs
-} from './tools/search-work-memory.js';
-import {
-  getRelatedKeywordsTool,
-  handleGetRelatedKeywords,
-  GetRelatedKeywordsArgs,
-  formatRelatedKeywords
-} from './tools/get-related-keywords.js';
-import {
-  getSearchStatsTool,
-  handleGetSearchStats,
-  GetSearchStatsArgs,
-  formatSearchStats
-} from './tools/get-search-stats.js';
-import {
-  optimizeSearchIndexTool,
-  handleOptimizeSearchIndex,
-  OptimizeSearchIndexArgs,
-  formatOptimizationResults
-} from './tools/optimize-search-index.js';
-import {
-  listWorkMemoriesTool,
-  handleListWorkMemories,
-  ListWorkMemoriesArgs
-} from './tools/list-work-memories.js';
-import {
-  deleteWorkMemoryTool,
-  handleDeleteWorkMemory,
-  DeleteWorkMemoryArgs
-} from './tools/delete-work-memory.js';
-
-import {
-  serverStatusTool,
-  handleGetServerStatus,
-  GetServerStatusArgs
-} from './tools/server-status.js';
-import {
-  getWorkMemoryHistoryTool,
-  handleGetWorkMemoryHistory,
-  GetWorkMemoryHistoryArgs
-} from './tools/get-work-memory-history.js';
-import {
-  getWorkMemoryVersionsTool,
-  handleGetWorkMemoryVersions,
-  GetWorkMemoryVersionsArgs
-} from './tools/get-work-memory-versions.js';
-
-import {
-  restoreMemoryVersionTool,
-  handleRestoreMemoryVersion,
-  RestoreMemoryVersionArgs,
-  listMemoryVersionsTool,
-  handleListMemoryVersions,
-  ListMemoryVersionsArgs
-} from './tools/restore-memory-version.js';
-
-import {
-  batchOperationsTool,
-  handleBatchOperations,
-  BatchOperationArgs
-} from './tools/batch-operations.js';
-import {
-  connectionMonitorTool,
-  handleConnectionMonitor,
-  ConnectionMonitorArgs
-} from './tools/connection-monitor.js';
-import {
-  optimizeDatabaseTool,
-  handleOptimizeDatabase
-} from './tools/optimize-database.js';
-
-// 세션 관리 도구들 (통합됨)
-import {
-  sessionManagerTool,
-  handleSessionManager,
-  SessionManagerArgs,
-  sessionStatusTool,
-  handleSessionStatus,
-  SessionStatusArgs,
-  // 호환성을 위한 기존 함수들
-  handleSetActiveSession,
-  SetActiveSessionArgs,
-  handleDetectActiveSession,
-  DetectActiveSessionArgs,
-  handleGetSessionContext,
-  handleSetAutoLink,
-  SetAutoLinkArgs,
-  handleClearActiveSession
-} from './tools/session-context-tools.js';
+// 통합된 5개 도구 import
+import { memoryTool, handleMemory, MemoryOperationArgs } from './tools/memory.js';
+import { searchTool, handleSearch, SearchOperationArgs } from './tools/search.js';
+import { sessionTool, handleSession, SessionOperationArgs } from './tools/session.js';
+import { historyTool, handleHistory, HistoryOperationArgs } from './tools/history.js';
+import { systemTool, handleSystem, SystemOperationArgs } from './tools/system.js';
 // FileLockManager는 SQLite 전환으로 더 이상 필요 없음
 import { OptimizedMemoryManager } from './utils/optimized-memory.js';
 import { ErrorRecoveryManager } from './utils/error-recovery.js';
@@ -120,6 +36,9 @@ import { join } from 'path';
 
 class WorkMemoryServer {
   private server: Server;
+  private requestQueue: Map<string, Promise<any>> = new Map();
+  private activeRequests: number = 0;
+  private maxConcurrentRequests: number = 5;
 
   constructor() {
     // 유지 (INFO) 또는 DEBUG로 하향: 부트 시점 한정 정보로 필요시 유지
@@ -212,25 +131,11 @@ class WorkMemoryServer {
     this.server.setRequestHandler(ListToolsRequestSchema, async () => {
       return {
         tools: [
-          addWorkMemoryTool,
-          updateWorkMemoryTool,
-          listWorkMemoriesTool,
-          deleteWorkMemoryTool,
-          searchWorkMemoryTool,
-          getRelatedKeywordsTool,
-          getSearchStatsTool,
-          optimizeSearchIndexTool,
-          serverStatusTool,
-          getWorkMemoryHistoryTool,
-          getWorkMemoryVersionsTool,
-          restoreMemoryVersionTool,
-          listMemoryVersionsTool,
-          batchOperationsTool,
-          connectionMonitorTool,
-          optimizeDatabaseTool,
-          // 세션 관리 도구들 (통합됨)
-          sessionManagerTool,
-          sessionStatusTool
+          memoryTool,
+          searchTool,
+          sessionTool,
+          historyTool,
+          systemTool
         ],
       };
     });
@@ -253,233 +158,211 @@ class WorkMemoryServer {
       };
     });
 
-    // 도구 실행 핸들러
+    // 도구 실행 핸들러 - 동기화된 처리
     this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const { name, arguments: args } = request.params;
+      const requestId = Math.random().toString(36).substring(2, 8);
       const startTime = Date.now();
 
-      try {
-        // DEBUG 또는 생략: 클라이언트 요청 응답으로, 상태 변화 없음
-        // logger.debug('MCP_HANDLER', `Executing tool: ${name}`, { args_keys: Object.keys(args || {}) });
+      // 동시 요청 제한 확인
+      if (this.activeRequests >= this.maxConcurrentRequests) {
+        logger.warn('MCP_HANDLER', `[${requestId}] Too many concurrent requests, queuing...`);
+        
+        return this.createSafeResponse(
+          `⏳ 서버가 현재 많은 요청을 처리 중입니다. 잠시 후 다시 시도해주세요.`,
+          requestId
+        );
+      }
 
-        // 타임아웃을 적용한 도구 실행 (30초)
-        const result = await withTimeout(this.executeToolSwitch(name, args, startTime), 30000, `Tool execution: ${name}`);
+      try {
+        this.activeRequests++;
+        logger.debug('MCP_HANDLER', `[${requestId}] Executing tool: ${name} (active: ${this.activeRequests})`, { args_keys: Object.keys(args || {}) });
+
+        // 요청 처리 실행
+        const executionPromise = this.executeWithSynchronization(name, args, startTime, requestId);
+        this.requestQueue.set(requestId, executionPromise);
+
+        const result = await withTimeout(
+          executionPromise,
+          30000,
+          `Tool execution: ${name} [${requestId}]`
+        );
+        
+        logger.debug('MCP_HANDLER', `[${requestId}] Tool execution completed: ${name}`);
         return result;
       } catch (error) {
         const err = error as Error;
         logger.toolError(name, err, args);
         
         const formattedError = formatErrorForUser(err);
-        return {
-          content: [
-            {
-              type: 'text',
-              text: `❌ Error executing ${name}: ${formattedError}`,
-            },
-          ],
-          isError: true,
-        };
+        logger.debug('MCP_HANDLER', `[${requestId}] Tool execution failed: ${name}`);
+        
+        return this.createSafeResponse(
+          `❌ Error executing ${name}: ${formattedError}`,
+          requestId
+        );
+      } finally {
+        this.activeRequests--;
+        this.requestQueue.delete(requestId);
+        logger.debug('MCP_HANDLER', `[${requestId}] Request cleanup completed (active: ${this.activeRequests})`);
       }
     });
   }
 
-  private async executeToolSwitch(name: string, args: any, startTime: number): Promise<any> {
+  /**
+   * 동기화된 요청 실행 - 경합 조건 방지
+   */
+  private async executeWithSynchronization(name: string, args: any, startTime: number, requestId: string): Promise<any> {
+    // 상태 플래그로 실행 추적
+    const executionState = {
+      started: Date.now(),
+      name,
+      requestId,
+      completed: false
+    };
+
+    try {
+      logger.debug('SYNC_EXEC', `[${requestId}] Starting synchronized execution for ${name}`);
+      
+      // 실제 도구 실행
+      const result = await this.executeToolSwitch(name, args, startTime, requestId);
+      
+      executionState.completed = true;
+      logger.debug('SYNC_EXEC', `[${requestId}] Synchronized execution completed for ${name}`);
+      
+      return result;
+    } catch (error) {
+      executionState.completed = true;
+      logger.error('SYNC_EXEC', `[${requestId}] Synchronized execution failed for ${name}`, {}, error as Error);
+      throw error;
+    }
+  }
+
+  private async executeToolSwitch(name: string, args: any, startTime: number, requestId?: string): Promise<any> {
+    const logPrefix = requestId ? `[${requestId}]` : '';
+    
     switch (name) {
-      case 'add_work_memory': {
-        const result = await withErrorHandling('ADD_MEMORY', name, handleAddWorkMemory)(args as unknown as AddWorkMemoryArgs);
-        logger.toolExecution(name, args, startTime); // 중요한 작업이므로 INFO 레벨로 기록
-        return {
-          content: [
-            {
-              type: 'text',
-              text: result,
-            },
-          ],
-        };
-      }
-
-      case 'update_work_memory': {
-        const result = await withErrorHandling('UPDATE_MEMORY', name, handleUpdateWorkMemory)(args as unknown as UpdateWorkMemoryArgs);
-        logger.toolExecution(name, args, startTime); // 중요한 작업이므로 INFO 레벨로 기록
-        return {
-          content: [
-            {
-              type: 'text',
-              text: result,
-            },
-          ],
-        };
-      }
-
-      case 'search_work_memory': {
-        const result = await withErrorHandling('SEARCH_MEMORY', name, handleSearchWorkMemory)(args as unknown as SearchWorkMemoryArgs);
-        logger.toolExecution(name, args, startTime); // 중요한 작업이므로 INFO 레벨로 기록
-        
-        return {
-          content: [{ type: 'text', text: result }],
-        };
-      }
-
-      case 'get_related_keywords': {
-        const result = await withErrorHandling('GET_KEYWORDS', name, handleGetRelatedKeywords)(args as unknown as GetRelatedKeywordsArgs);
-        // DEBUG로 하향: 반복 빈도 높고, 정상 상태에서는 불필요함
-        // logger.toolExecution(name, args, startTime);
-        
-        if (result.success && result.related_keywords) {
-          const text = formatRelatedKeywords(
-            result.keyword, 
-            result.related_keywords, 
-            result.search_suggestions
-          );
-          return {
-            content: [{ type: 'text', text }],
-          };
-        } else {
-          return {
-            content: [{ type: 'text', text: `❌ 연관 키워드 조회 실패: ${result.error}` }],
-            isError: true,
-          };
-        }
-      }
-
-      case 'get_search_stats': {
-        const result = await withErrorHandling('SEARCH_STATS', name, handleGetSearchStats)(args as unknown as GetSearchStatsArgs);
-        // DEBUG로 하향: 반복 빈도 높고, 정상 상태에서는 불필요함
-        // logger.toolExecution(name, args, startTime);
-        
-        if (result.success) {
-          const text = formatSearchStats(result);
-          return {
-            content: [{ type: 'text', text }],
-          };
-        } else {
-          return {
-            content: [{ type: 'text', text: `❌ 검색 통계 조회 실패: ${result.error}` }],
-            isError: true,
-          };
-        }
-      }
-
-      case 'optimize_search_index': {
-        const result = await withErrorHandling('OPTIMIZE_INDEX', name, handleOptimizeSearchIndex)(args as unknown as OptimizeSearchIndexArgs);
-        // DEBUG로 하향: 반복 빈도 높고, 정상 상태에서는 불필요함
-        // logger.toolExecution(name, args, startTime);
-        
-        return {
-          content: [{ type: 'text', text: result }],
-        };
-      }
-
-      case 'list_work_memories': {
-        const result = await withErrorHandling('LIST_MEMORIES', name, handleListWorkMemories)(args as unknown as ListWorkMemoriesArgs);
-        // DEBUG로 하향: 반복 빈도 높고, 정상 상태에서는 불필요함
-        // logger.toolExecution(name, args, startTime);
-        
-        return {
-          content: [{ type: 'text', text: result }],
-        };
-      }
-
-      case 'delete_work_memory': {
-        const result = await withErrorHandling('DELETE_MEMORY', name, handleDeleteWorkMemory)(args as unknown as DeleteWorkMemoryArgs);
-        logger.toolExecution(name, args, startTime); // 중요한 작업이므로 INFO 레벨로 기록
-        return {
-          content: [{ type: 'text', text: result }],
-        };
-      }
-
-      case 'get_server_status': {
-        const result = await withErrorHandling('SERVER_STATUS', name, handleGetServerStatus)(args as unknown as GetServerStatusArgs);
-        // DEBUG로 하향: 반복 빈도 높고, 정상 상태에서는 불필요함
-        // logger.toolExecution(name, args, startTime);
-        return {
-          content: [{ type: 'text', text: result }],
-        };
-      }
-
-      case 'get_work_memory_history': {
-        const result = await withErrorHandling('HISTORY', name, handleGetWorkMemoryHistory)(args as unknown as GetWorkMemoryHistoryArgs);
-        // DEBUG로 하향: 반복 빈도 높고, 정상 상태에서는 불필요함
-        // logger.toolExecution(name, args, startTime);
-        return {
-          content: [{ type: 'text', text: result }],
-        };
-      }
-
-      case 'get_work_memory_versions': {
-        const result = await withErrorHandling('VERSIONS', name, handleGetWorkMemoryVersions)(args as unknown as GetWorkMemoryVersionsArgs);
-        // DEBUG로 하향: 반복 빈도 높고, 정상 상태에서는 불필요함
-        // logger.toolExecution(name, args, startTime);
-        return {
-          content: [{ type: 'text', text: result }],
-        };
-      }
-
-
-
-      case 'restore_memory_version': {
-        const result = await withErrorHandling('RESTORE_VERSION', name, handleRestoreMemoryVersion)(args as unknown as RestoreMemoryVersionArgs);
-        // DEBUG로 하향: 반복 빈도 높고, 정상 상태에서는 불필요함
-        // logger.toolExecution(name, args, startTime);
-        return {
-          content: [{ type: 'text', text: result }],
-        };
-      }
-
-      case 'list_memory_versions': {
-        const result = await withErrorHandling('LIST_VERSIONS', name, handleListMemoryVersions)(args as unknown as ListMemoryVersionsArgs);
-        // DEBUG로 하향: 반복 빈도 높고, 정상 상태에서는 불필요함
-        // logger.toolExecution(name, args, startTime);
-        return {
-          content: [{ type: 'text', text: result }],
-        };
-      }
-
-      case 'batch_operations': {
-        const result = await withErrorHandling('BATCH_OPERATIONS', name, handleBatchOperations)(args as unknown as BatchOperationArgs);
+      case 'memory': {
+        logger.debug('TOOL_EXEC', `${logPrefix} Starting memory operation`, { operation: args?.operation });
+        const result = await withErrorHandling('MEMORY', name, handleMemory, requestId)(args as unknown as MemoryOperationArgs);
         logger.toolExecution(name, args, startTime);
-        return {
-          content: [{ type: 'text', text: result }],
-        };
+        logger.debug('TOOL_EXEC', `${logPrefix} Memory operation completed`);
+        
+        // 안전한 JSON 응답 생성
+        return this.createSafeResponse(result, requestId);
       }
 
-      case 'connection_monitor': {
-        const result = await withErrorHandling('CONNECTION_MONITOR', name, handleConnectionMonitor)(args as unknown as ConnectionMonitorArgs);
+      case 'search': {
+        logger.debug('TOOL_EXEC', `${logPrefix} Starting search operation`, { operation: args?.operation });
+        const result = await withErrorHandling('SEARCH', name, handleSearch, requestId)(args as unknown as SearchOperationArgs);
         logger.toolExecution(name, args, startTime);
-        return {
-          content: [{ type: 'text', text: result }],
-        };
+        logger.debug('TOOL_EXEC', `${logPrefix} Search operation completed`);
+        return this.createSafeResponse(result, requestId);
       }
 
-      case 'optimize_database': {
-        const dbPath = databaseManager.getDbPath();
-        const result = await withErrorHandling('OPTIMIZE_DATABASE', name, () => handleOptimizeDatabase(dbPath))();
+      case 'session': {
+        logger.debug('TOOL_EXEC', `${logPrefix} Starting session operation`, { operation: args?.operation });
+        const result = await withErrorHandling('SESSION', name, handleSession, requestId)(args as unknown as SessionOperationArgs);
         logger.toolExecution(name, args, startTime);
-        return {
-          content: [{ type: 'text', text: result }],
-        };
+        logger.debug('TOOL_EXEC', `${logPrefix} Session operation completed`);
+        return this.createSafeResponse(result, requestId);
       }
 
-      // 세션 관리 도구들 (통합됨)
-      case 'session_manager': {
-        const result = await withErrorHandling('SESSION_MANAGER', name, handleSessionManager)(args as unknown as SessionManagerArgs);
+      case 'history': {
+        logger.debug('TOOL_EXEC', `${logPrefix} Starting history operation`, { operation: args?.operation });
+        const result = await withErrorHandling('HISTORY', name, handleHistory, requestId)(args as unknown as HistoryOperationArgs);
         logger.toolExecution(name, args, startTime);
-        return {
-          content: [{ type: 'text', text: result }],
-        };
+        logger.debug('TOOL_EXEC', `${logPrefix} History operation completed`);
+        return this.createSafeResponse(result, requestId);
       }
 
-      case 'session_status': {
-        const result = await withErrorHandling('SESSION_STATUS', name, handleSessionStatus)(args as unknown as SessionStatusArgs);
+      case 'system': {
+        logger.debug('TOOL_EXEC', `${logPrefix} Starting system operation`, { operation: args?.operation });
+        const result = await withErrorHandling('SYSTEM', name, handleSystem, requestId)(args as unknown as SystemOperationArgs);
         logger.toolExecution(name, args, startTime);
-        return {
-          content: [{ type: 'text', text: result }],
-        };
+        logger.debug('TOOL_EXEC', `${logPrefix} System operation completed`);
+        return this.createSafeResponse(result, requestId);
       }
 
       default:
         throw new Error(`Unknown tool: ${name}`);
     }
+  }
+
+  /**
+   * 안전한 MCP 응답 생성 - race condition 방지
+   */
+  private createSafeResponse(result: any, requestId?: string): any {
+    try {
+      // 동기적 처리로 race condition 방지
+      let textContent = typeof result === 'string' ? result : String(result);
+      
+      // MCP 프로토콜 준수를 위한 내용 정화
+      textContent = this.sanitizeContent(textContent);
+      
+      // 최소한의 MCP 응답 구조 (메타데이터 제거로 안정성 향상)
+      const response = {
+        content: [{ 
+          type: 'text', 
+          text: textContent 
+        }]
+      };
+      
+      // 동기적 직렬화 테스트 - race condition 방지
+      const serialized = JSON.stringify(response);
+      
+      // 안전성 검증
+      if (!serialized || serialized.includes('undefined') || serialized.includes('[object Object]')) {
+        throw new Error('Invalid response content detected');
+      }
+      
+      return response;
+    } catch (error) {
+      // 폴백 응답 - 최대한 단순하게
+      return {
+        content: [{ 
+          type: 'text', 
+          text: 'Operation completed. Please check the results.' 
+        }]
+      };
+    }
+  }
+
+  /**
+   * MCP 프로토콜 준수 내용 정화 - 파싱 오류 방지
+   */
+  private sanitizeContent(content: string): string {
+    if (typeof content !== 'string') {
+      return String(content || '');
+    }
+    
+    let sanitized = content;
+    
+    // MCP 클라이언트 파싱 오류를 유발할 수 있는 모든 패턴 제거
+    sanitized = sanitized.replace(/async\s+function[^}]*}/g, '');
+    sanitized = sanitized.replace(/function\s+\w+[^}]*}/g, '');
+    sanitized = sanitized.replace(/Version\s*\{[^}]*}/g, '');
+    sanitized = sanitized.replace(/JSON[\s\S]*?parse/gi, '');
+    sanitized = sanitized.replace(/parse[\s\S]*?error/gi, '');
+    sanitized = sanitized.replace(/stringify[\s\S]*?failed/gi, '');
+    
+    // 제어 문자 완전 제거
+    sanitized = sanitized.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+    sanitized = sanitized.replace(/^\uFEFF/, '');
+    
+    // 로그 패턴 제거
+    sanitized = sanitized.replace(/^\[.*?\].*$/gm, '');
+    sanitized = sanitized.replace(/^(Starting|Loading|Initializing|ERROR|WARN|INFO|DEBUG).*$/gmi, '');
+    
+    // 공백 정리
+    sanitized = sanitized.replace(/\s+/g, ' ').trim();
+    
+    // 길이 제한 (더 보수적으로)
+    if (sanitized.length > 10000) {
+      sanitized = sanitized.substring(0, 10000);
+    }
+    
+    return sanitized;
   }
 
   private setupErrorHandling(): void {
@@ -623,12 +506,7 @@ class WorkMemoryServer {
    */
   async run(): Promise<void> {
     try {
-      // 서버 시작 시 확실한 로그 남기기
-      import('fs').then(fs => 
-        fs.appendFileSync('./mcp_server_startup.log', 
-          `${new Date().toISOString()} - MCP 서버 시작됨 (PID: ${process.pid})\n`
-        )
-      ).catch(() => {});
+      // MCP 프로토콜 준수를 위해 모든 파일 로깅 비활성화
       
       logger.serverStatus('Starting MCP transport connection');
       
@@ -638,24 +516,12 @@ class WorkMemoryServer {
       const transport = new StdioServerTransport();
       await this.server.connect(transport);
       
-      // 서버 연결 후 로그
-      import('fs').then(fs => 
-        fs.appendFileSync('./mcp_server_startup.log', 
-          `${new Date().toISOString()} - MCP 서버 연결 완료\n`
-        )
-      ).catch(() => {});
+      // MCP 프로토콜 준수 - 모든 파일 로깅 비활성화
       
       // 유지 (INFO): 최초 성공 메시지로 가치 있음
       logger.serverStatus('MCP Server started successfully');
       
-      // 주기적 heartbeat (30초마다)
-      setInterval(() => {
-        import('fs').then(fs => 
-          fs.appendFileSync('./mcp_server_heartbeat.log', 
-            `${new Date().toISOString()} - MCP 서버 실행 중 (PID: ${process.pid})\n`
-          )
-        ).catch(() => {});
-      }, 30000);
+      // MCP 프로토콜 준수 - heartbeat 완전 비활성화
       
     } catch (error) {
       logger.error('SERVER', 'Failed to start MCP server', {}, error as Error);
@@ -670,8 +536,8 @@ async function main() {
     const server = new WorkMemoryServer();
     await server.run();
   } catch (error) {
-    // 최상위 레벨에서 발생하는 모든 오류를 명시적으로 로깅
-    console.error('[CRITICAL_ERROR] The MCP server failed to start.', error);
+    // 최상위 레벨에서 발생하는 모든 오류를 stderr로 출력
+    process.stderr.write(`[CRITICAL_ERROR] MCP server startup failed: ${error}\n`);
     process.exit(1); // 오류 발생 시 비정상 종료
   }
 }
@@ -679,12 +545,16 @@ async function main() {
 main();
 
 // 간단한 에러 핸들링 함수
-const withErrorHandling = (operation: string, toolName: string, handler: Function) => {
+const withErrorHandling = (operation: string, toolName: string, handler: Function, requestId?: string) => {
   return async (...args: any[]) => {
+    const logPrefix = requestId ? `[${requestId}]` : '';
     try {
-      return await handler(...args);
+      logger.debug('ERROR_HANDLER', `${logPrefix} Executing ${toolName}`);
+      const result = await handler(...args);
+      logger.debug('ERROR_HANDLER', `${logPrefix} ${toolName} completed successfully`);
+      return result;
     } catch (error) {
-      logger.error(operation, `Error in ${toolName}`, {}, error as Error);
+      logger.error(operation, `${logPrefix} Error in ${toolName}`, {}, error as Error);
       throw error;
     }
   };

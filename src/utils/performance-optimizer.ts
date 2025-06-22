@@ -22,6 +22,9 @@ class PerformanceOptimizer {
   private static instance: PerformanceOptimizer;
   private queryCache: QueryCache = {};
   private readonly DEFAULT_CACHE_TTL = 5 * 60 * 1000; // 5분
+  private readonly MAX_CACHE_ENTRIES = 500; // 최대 캐시 엔트리 수
+  private readonly MAX_CACHE_SIZE = 50 * 1024 * 1024; // 최대 50MB
+  private cacheStats = { hits: 0, misses: 0 };
 
   static getInstance(): PerformanceOptimizer {
     if (!PerformanceOptimizer.instance) {
@@ -71,8 +74,14 @@ class PerformanceOptimizer {
 
     // 캐시 히트 확인
     if (cached && Date.now() - cached.timestamp < cached.ttl) {
+      this.cacheStats.hits++;
       return cached.result;
     }
+
+    this.cacheStats.misses++;
+
+    // 캐시 크기 확인 및 정리
+    this.enforeCacheLimits();
 
     // 쿼리 실행
     const result = await connection.all(query, params);
@@ -278,11 +287,48 @@ class PerformanceOptimizer {
   getCacheStats(): { totalEntries: number; totalSize: number; hitRate: number } {
     const totalEntries = Object.keys(this.queryCache).length;
     const totalSize = JSON.stringify(this.queryCache).length;
-    
-    // 간단한 히트율 계산 (실제 구현에서는 더 정교한 메트릭 필요)
-    const hitRate = 0.85; // 예시값
+    const totalRequests = this.cacheStats.hits + this.cacheStats.misses;
+    const hitRate = totalRequests > 0 ? this.cacheStats.hits / totalRequests : 0;
     
     return { totalEntries, totalSize, hitRate };
+  }
+
+  /**
+   * 캐시 크기 제한 강제
+   */
+  private enforeCacheLimits(): void {
+    const entries = Object.entries(this.queryCache);
+    
+    // 엔트리 수 제한
+    if (entries.length >= this.MAX_CACHE_ENTRIES) {
+      // LRU 정책으로 가장 오래된 엔트리 삭제
+      const sortedEntries = entries.sort(([, a], [, b]) => a.timestamp - b.timestamp);
+      const toDelete = sortedEntries.slice(0, Math.floor(this.MAX_CACHE_ENTRIES * 0.2)); // 20% 삭제
+      
+      toDelete.forEach(([key]) => {
+        delete this.queryCache[key];
+      });
+    }
+    
+    // 메모리 크기 제한
+    const currentSize = JSON.stringify(this.queryCache).length;
+    if (currentSize > this.MAX_CACHE_SIZE) {
+      // 크기가 큰 엔트리부터 삭제
+      const entriesWithSize = entries.map(([key, value]) => ({
+        key,
+        value,
+        size: JSON.stringify(value).length
+      })).sort((a, b) => b.size - a.size);
+      
+      let removedSize = 0;
+      const targetSize = this.MAX_CACHE_SIZE * 0.8; // 80%까지 줄이기
+      
+      for (const entry of entriesWithSize) {
+        if (currentSize - removedSize <= targetSize) break;
+        delete this.queryCache[entry.key];
+        removedSize += entry.size;
+      }
+    }
   }
 
   private generateCacheKey(query: string, params: any[]): string {
