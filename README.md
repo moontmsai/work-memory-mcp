@@ -24,7 +24,7 @@ Rather than randomly scattered information, you can build a systematically organ
 
 ### Memory Management
 - Store work content, deliverables, and learned information in structured format
-- Priority management through importance scores (0-10 points)
+- Priority management through importance scores (0-100 points)
 - Multi-dimensional classification through tag system
 - Separate management of todos and general memories
 - Work progress management through completion status tracking
@@ -73,7 +73,7 @@ Core tool responsible for creating, modifying, querying, and deleting work memor
 - Todos: Tasks to be performed and their progress status
 - Project-based classification
 - Tag-based multi-dimensional classification
-- Importance scores (0-10 points)
+- Importance scores (0-100 points)
 
 ### 2. Search (Search and Analysis)
 Tool for efficiently finding and analyzing stored work memories.
@@ -536,7 +536,7 @@ AI와의 대화는 세션이 끝나면 사라지지만, 중요한 작업 내용�
 
 ### 메모리 관리
 - 작업 내용, 결과물, 학습한 내용을 구조화된 형태로 저장
-- 중요도 점수(0-10점)를 통한 우선순위 관리
+- 중요도 점수(0-100점)를 통한 우선순위 관리
 - 태그 시스템으로 다차원적 분류
 - 할일(Todo)과 일반 메모리(Memory) 구분 관리
 - 완료 상태 추적을 통한 작업 진행률 관리
@@ -585,7 +585,7 @@ Work Memory MCP는 5개의 통합 도구로 구성되어 있습니다:
 - 할일: 수행해야 할 작업과 진행 상태
 - 프로젝트별 분류
 - 태그 기반 다차원 분류
-- 중요도 점수 (0-10점)
+- 중요도 점수 (0-100점)
 
 ### 2. Search (검색 및 분석)
 저장된 작업 기억을 효율적으로 찾고 분석하는 도구입니다.
