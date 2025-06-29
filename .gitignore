@@ -52,6 +52,7 @@ jspm_packages/
 .env.development.local
 .env.test.local
 .env.production.local
+.env.mcp
 
 # Application Files (Exclude Claude app files)
 *.exe
@@ -99,6 +100,7 @@ Thumbs.db
 
 # AI Assistant files
 .cursor/
+.claude/
 .roo/
 .taskmaster/
 
@@ -123,6 +125,20 @@ backups/
 tmp/
 temp/
 .tmp/
+
+# Development/Testing files
+analyze_history_simple.js
+analyze_history_tables.cjs
+env.example
+npm
+rimraf
+work-memory-mcp@0.1.1
+
+# Conflict resolution files
+node_modules_*_conflict_*
+
+# WindSurf AI rules (personal preference)
+.windsurfrules
 
 # Windows specific
 Thumbs.db

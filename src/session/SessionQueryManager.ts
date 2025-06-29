@@ -70,7 +70,7 @@ export class SessionQueryManager {
 
       if (includeMemories) {
         const memories = await this.connection.all(
-          'SELECT * FROM work_memories WHERE session_id = ? ORDER BY created_at DESC',
+          'SELECT * FROM work_memories WHERE session_id = ?  ORDER BY created_at DESC',
           [sessionId]
         );
 
@@ -161,7 +161,7 @@ export class SessionQueryManager {
         resultSessions = await Promise.all(
           sessions.map(async (session) => {
             const memories = await this.connection.all(
-              'SELECT * FROM work_memories WHERE session_id = ? ORDER BY created_at DESC',
+              'SELECT * FROM work_memories WHERE session_id = ?  ORDER BY created_at DESC',
               [session.session_id]
             );
             
@@ -492,11 +492,13 @@ export class SessionQueryManager {
         const tagConditions = filter.tags.map(() => 'tags LIKE ?');
         conditions.push(`(${tagConditions.join(' OR ')})`);
         filter.tags.forEach(tag => {
-          params.push(`%"${tag}"%`);
+          const safeTag = tag.replace(/"/g, '""'); // SQLite 이스케이핑
+          params.push(`%"${safeTag}"%`);
         });
       } else {
+        const safeTag = filter.tags.replace(/"/g, '""'); // SQLite 이스케이핑
         conditions.push('tags LIKE ?');
-        params.push(`%"${filter.tags}"%`);
+        params.push(`%"${safeTag}"%`);
       }
     }
 

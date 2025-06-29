@@ -15,6 +15,7 @@ import {
   SwitchDecision 
 } from '../types/session.js';
 import { DatabaseConnection } from '../database/connection.js';
+import { logger } from '../utils/logger.js';
 
 export interface AutoSwitchEngineConfig {
   enabled: boolean;
@@ -487,15 +488,15 @@ export class AutoSwitchEngine extends EventEmitter {
    */
   private setupEventHandlers(): void {
     this.on('error', (error) => {
-      console.error('[AutoSwitchEngine]', error);
+      logger.error('auto-switch-engine', 'Engine error', { error: typeof error === 'string' ? error : error instanceof Error ? error.message : String(error) });
     });
 
     this.on('info', (message) => {
-      console.log('[AutoSwitchEngine]', message);
+      logger.info('auto-switch-engine', 'Engine info', { message: typeof message === 'string' ? message : String(message) });
     });
 
     this.on('warning', (message) => {
-      console.warn('[AutoSwitchEngine]', message);
+      logger.warn('auto-switch-engine', 'Engine warning', { message: typeof message === 'string' ? message : String(message) });
     });
   }
 

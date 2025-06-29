@@ -150,7 +150,7 @@ export async function findSimilarSession(
 
     return null;
   } catch (error) {
-    console.warn('Error finding similar session:', error);
+    logger.warn('session-memory-linker', 'Error finding similar session', { error: error instanceof Error ? error.message : String(error) });
     return null;
   }
 }
@@ -172,7 +172,7 @@ export async function reactivateSession(
     
     return true;
   } catch (error) {
-    console.warn('Error reactivating session:', error);
+    logger.warn('session-memory-linker', 'Error reactivating session', { error: error instanceof Error ? error.message : String(error) });
     return false;
   }
 }
